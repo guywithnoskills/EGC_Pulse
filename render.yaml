@@ -1,29 +1,24 @@
-# Render Blueprint for EGC Pulse (the demo/ Python backend + dashboard).
-# Deploy: push this repo to GitHub, then in Render → "New +" → "Blueprint" → pick
-# the repo. Render reads this file, builds the app, and prompts for any secret
-# values (everything marked `sync: false`). Nothing secret is stored in this file.
+# Render Blueprint for EGC Pulse.
+# This version is for a repo where the app files sit at the TOP LEVEL
+# (pulse_demo.py, Dockerfile, etc. in the root — not inside a demo/ folder).
 #
-# DEFAULT BELOW = FREE tier: no credit card, ideal for a first deploy / demo.
-# Trade-off: a free service sleeps after ~15 min idle and its data resets on
-# restart. To keep collected data permanently, see "PAID / PERSISTENT" at the
-# bottom of this file.
+# DEFAULT = FREE tier: no credit card. A free service sleeps after ~15 min idle
+# and its data resets on restart. To keep data permanently, see "PAID" at bottom.
 services:
   - type: web
     name: egc-pulse
     runtime: docker
-    dockerfilePath: ./demo/Dockerfile
-    dockerContext: ./demo
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     plan: free
     healthCheckPath: /
-    # Render injects PORT automatically; the app already binds 0.0.0.0:$PORT.
     envVars:
       - key: INTERNAL_USE_ONLY
         value: "true"
       - key: AI_INSIGHTS_ENABLED
         value: "false"
-      # ── Secrets: Render prompts for these on deploy. `sync: false` means they
-      #    are never stored in the repo. Leave any blank to keep that source
-      #    honestly gated (the app still runs on the free keyless sources). ──
+      # Secrets — Render prompts for these; never stored in the repo. Leave blank
+      # to keep that source honestly gated (the app still runs on keyless sources).
       - key: REDDIT_CLIENT_ID
         sync: false
       - key: REDDIT_CLIENT_SECRET
@@ -52,15 +47,14 @@ services:
         sync: false
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAID / PERSISTENT (keeps collected data across restarts; needs a card, ~$7/mo):
-#   1. change `plan: free` above to `plan: starter`
-#   2. add this block under the service (same indentation as `envVars:`):
+# PAID / PERSISTENT (keeps collected data; needs a card, ~$7/mo):
+#   1. change `plan: free` to `plan: starter`
+#   2. add under the service (same indent as `envVars:`):
 #        disk:
 #          name: pulse-data
 #          mountPath: /data
 #          sizeGB: 1
-#   3. add this env var to the list above:
+#   3. add to the env var list:
 #        - key: PULSE_DB
 #          value: /data/pulse_demo.db
-# (The app already supports PULSE_DB — it just needs the disk to point at.)
 # ─────────────────────────────────────────────────────────────────────────────
