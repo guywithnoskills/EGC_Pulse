@@ -228,14 +228,84 @@ def _licensed(platform, term, start, end, limit):
         print("  [%s] LICENSED_PROVIDER_API_KEY set but LICENSED_PROVIDER_URL missing" % platform)
         return []
     try:
-        q = urllib.parse.urlencode({"platform": platform, "q": term,
-                                    "start": start or "", "end": end or "", "limit": limit})
+        # Send common parameter aliases so the same adapter fits different
+        # provider contracts (platform, query, start_date, end_date).
+        q = urllib.parse.urlencode({"platform": platform, "q": term, "query": term,
+                                    "start": start or "", "end": end or "",
+                                    "start_date": start or "", "end_date": end or "", "limit": limit})
         data = fetch_json(base + "?" + q,
                           headers={"Authorization": "Bearer " + os.environ["LICENSED_PROVIDER_API_KEY"]})
+        # Provider data is labeled licensed_provider downstream by source_truth.
         return data.get("mentions", []) if isinstance(data, dict) else []
     except Exception as e:
         print("  [%s/licensed] %s" % (platform, e))
         return []
+
+
+# ── OWNED-ACCOUNT ANALYTICS (impressions / reach / engagement) ────────────────
+# The ONLY compliant source of impressions & reach. These are private metrics
+# that ONLY the account owner can see, so this works for accounts that have
+# authorized THIS app via Meta Login — your own or your clients'. Never
+# third-party, never scraped. Returns a clear "not configured" payload until a
+# connected account + token are present; it never fabricates numbers.
+GRAPH = "https://graph.facebook.com/v21.0"
+
+
+def _insights_series(data):
+    out = []
+    for m in (data.get("data") or []):
+        vals = m.get("values") or []
+        out.append({"metric": m.get("name"), "title": m.get("title") or m.get("name"),
+                    "total": sum(int(v.get("value") or 0) for v in vals),
+                    "series": [{"t": v.get("end_time"), "value": v.get("value")} for v in vals]})
+    return out
+
+
+def meta_account_insights(start=None, end=None):
+    """Instagram Business/Creator account insights (impressions, reach,
+    profile_views) via the Meta Graph API, for an account that connected this
+    app. Owner-authorized data only. Metric names can shift by Graph API
+    version; these follow the current documented account-level metrics."""
+    token, ig = os.environ.get("META_ACCESS_TOKEN"), os.environ.get("META_IG_USER_ID")
+    if not (token and ig):
+        return {"platform": "instagram", "configured": False,
+                "needs": ["META_ACCESS_TOKEN", "META_IG_USER_ID"],
+                "note": "Connect an owner-authorized Instagram Business/Creator account to load impressions & reach.",
+                "metrics": []}
+    try:
+        url = "%s/%s/insights?%s" % (GRAPH, ig, urllib.parse.urlencode(
+            {"metric": "impressions,reach,profile_views", "period": "day", "access_token": token}))
+        return {"platform": "instagram", "configured": True, "ok": True, "account_id": ig,
+                "source": "meta_graph_api_insights", "metrics": _insights_series(fetch_json(url))}
+    except urllib.error.HTTPError as e:
+        return {"platform": "instagram", "configured": True, "ok": False, "metrics": [],
+                "error": "Meta rejected the request (HTTP %d). Check the token, the connected IG Business "
+                         "account, and instagram_manage_insights permission / app review." % e.code}
+    except Exception as e:
+        return {"platform": "instagram", "configured": True, "ok": False, "metrics": [], "error": str(e)[:160]}
+
+
+def facebook_page_insights(start=None, end=None):
+    """Owned Facebook Page insights (impressions, unique reach) via the Meta
+    Graph API, for a Page this app manages. Owner-authorized data only."""
+    token, page = os.environ.get("META_ACCESS_TOKEN"), os.environ.get("META_FB_PAGE_ID")
+    if not (token and page):
+        return {"platform": "facebook", "configured": False,
+                "needs": ["META_ACCESS_TOKEN", "META_FB_PAGE_ID"],
+                "note": "Connect an owned Facebook Page to load impressions & reach.",
+                "metrics": []}
+    try:
+        url = "%s/%s/insights?%s" % (GRAPH, page, urllib.parse.urlencode(
+            {"metric": "page_impressions,page_impressions_unique,page_post_engagements",
+             "period": "day", "access_token": token}))
+        return {"platform": "facebook", "configured": True, "ok": True, "page_id": page,
+                "source": "meta_graph_api_insights", "metrics": _insights_series(fetch_json(url))}
+    except urllib.error.HTTPError as e:
+        return {"platform": "facebook", "configured": True, "ok": False, "metrics": [],
+                "error": "Meta rejected the request (HTTP %d). Check the token, the connected Page, and "
+                         "pages_read_engagement permission / app review." % e.code}
+    except Exception as e:
+        return {"platform": "facebook", "configured": True, "ok": False, "metrics": [], "error": str(e)[:160]}
 
 
 # ── OPEN / keyless connectors (genuinely compliant public APIs) ───────────────
@@ -256,6 +326,34 @@ def collect_mastodon(term, start=None, end=None, limit=25, instance="mastodon.so
                     "url": s.get("url"), "lang": (s.get("language") or "en")[:2],
                     "posted_at": s.get("created_at") or now_iso(),
                     "engagement": int(s.get("favourites_count") or 0) + int(s.get("reblogs_count") or 0)})
+    return out
+
+
+def collect_bluesky(term, start=None, end=None, limit=25):
+    """Bluesky / AT Protocol public post search via the official AppView.
+    No key, no auth, no scraping. Free. (searchPosts is served by api.bsky.app;
+    the public.api.bsky.app host gates search behind auth.)"""
+    if not term:
+        return []
+    try:
+        data = fetch_json("https://api.bsky.app/xrpc/app.bsky.feed.searchPosts?" +
+                          urllib.parse.urlencode({"q": term, "limit": min(limit, 100)}))
+    except Exception as e:
+        print("  [bluesky] %s" % e)
+        return []
+    out = []
+    for p in (data.get("posts", []) if isinstance(data, dict) else []):
+        rec = p.get("record") or {}
+        author = p.get("author") or {}
+        handle = author.get("handle") or ""
+        uri = p.get("uri") or ""
+        rkey = uri.rsplit("/", 1)[-1] if uri else ""
+        url = ("https://bsky.app/profile/%s/post/%s" % (handle, rkey)) if (handle and rkey) else None
+        out.append({"platform": "bluesky", "platform_post_id": p.get("cid") or uri,
+                    "author": ("@" + handle) if handle else (author.get("displayName") or None),
+                    "content": rec.get("text"), "url": url,
+                    "posted_at": rec.get("createdAt") or p.get("indexedAt") or now_iso(),
+                    "engagement": int(p.get("likeCount") or 0) + int(p.get("repostCount") or 0) + int(p.get("replyCount") or 0)})
     return out
 
 

@@ -135,6 +135,13 @@
   .covmini{font-size:12px;color:var(--muted);line-height:1.65}
   .covmini b{color:var(--ink2)}
   .covmini .disc{font-size:11px;color:var(--faint);margin-top:6px}
+  .ai-row{font-size:12px;color:var(--muted);padding:7px 0;border-top:1px solid var(--line)}
+  .ai-row:first-child{border-top:none}
+  .ai-row b{color:var(--ink2);font-weight:700}
+  .ai-gate{font-size:9.5px;letter-spacing:.3px;color:var(--faint);border:1px solid var(--line2);border-radius:9px;padding:0 6px;margin-left:5px}
+  .ai-note{font-size:11px;color:var(--faint);margin-top:4px;line-height:1.5}
+  .ai-metric{display:inline-block;margin:5px 12px 0 0;font-size:11.5px}
+  .ai-num{font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
   .exp{display:flex;flex-direction:column;gap:7px}
   .exp a{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--line2);border-radius:8px;
         padding:8px 11px;text-decoration:none;color:var(--ink);font-size:13px}
@@ -181,6 +188,9 @@
   .card .acts .btn{height:30px;font-size:12px;padding:0 11px}
   .card .lc{font-size:10.5px;color:var(--faint);margin-left:auto}
   .card .tres{font-size:11.5px;margin-top:7px}
+  .card .note{font-size:11px;color:var(--faint);border:1px dashed var(--line2);border-radius:7px;padding:3px 9px}
+  .hostnote{font-size:11.5px;color:var(--ink2);background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:12px;line-height:1.55}
+  .hostnote b{color:var(--ink)}
   .ok{color:#1f5a1f}.bad{color:#8a2020}
   .keyrow{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--faint);margin-top:6px}
   .keyrow b{color:var(--ink2);font-weight:700}
@@ -328,6 +338,11 @@
       </div>
 
       <div class="block">
+        <h3>Account insights · impressions &amp; reach (connected)</h3>
+        <div id="acctInsights"></div>
+      </div>
+
+      <div class="block">
         <h3>Export &amp; report</h3>
         <div class="exp">
           <a class="exp-csv" download>Mentions CSV <span class="ar">↓</span></a>
@@ -365,8 +380,9 @@
     <h2 class="serif">Accounts &amp; access</h2>
     <span class="closeX" id="closeAcct">Close</span>
   </div>
-  <div class="lead">Add credentials in <code>demo/.env</code>, restart the server, then Test connection. Secrets stay
-    server-side — never typed into the browser, never logged, never sent to the AI layer. Only variable names are shown.</div>
+  <div class="lead">Credentials are <b>server-side environment variables</b> — never typed into the browser, never
+    logged, never sent to the AI layer (only variable names are shown). Set them locally in <code>demo/.env</code> and
+    restart, or in production in your host's environment settings and redeploy.</div>
   <div id="acctList"></div>
 </div>
 
@@ -389,6 +405,11 @@
 <script>
 /* ───────────────────────── helpers ───────────────────────── */
 const $=id=>document.getElementById(id);
+// API base: same-origin relative by default (works locally and on a single-origin
+// host). For split hosting, the backend's /api/config returns api_base from the
+// PUBLIC_API_BASE_URL env var, and it is applied at startup. Never hardcoded.
+let API_BASE='';
+const api=(p,o)=>fetch(API_BASE+p,o);
 const esc=s=>(s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const fmt=n=>n>=1000?(Math.round(n/100)/10)+'k':''+n;
 const todayISO=()=>new Date().toISOString().slice(0,10);
@@ -398,11 +419,11 @@ function fmtTime(t){try{return t?new Date(t).toLocaleString():'not checked';}cat
 function parseList(v){if(Array.isArray(v))return v;try{return JSON.parse(v||'[]')}catch(e){return [];}}
 
 const PLAT_NAMES={reddit:'Reddit',x:'X / Twitter',meta:'Meta',instagram:'Instagram',facebook:'Facebook',
-  tiktok:'TikTok',manual:'Manual import',mastodon:'Mastodon',lemmy:'Lemmy',nostr:'Nostr',peertube:'PeerTube',
+  tiktok:'TikTok',manual:'Manual import',bluesky:'Bluesky',mastodon:'Mastodon',lemmy:'Lemmy',nostr:'Nostr',peertube:'PeerTube',
   hackernews:'Hacker News',news:'News (GDELT)'};
-const PLAT_ORDER=['reddit','x','meta','instagram','facebook','tiktok','manual','mastodon','lemmy','nostr','peertube','hackernews','news'];
+const PLAT_ORDER=['reddit','x','meta','instagram','facebook','tiktok','manual','bluesky','mastodon','lemmy','nostr','peertube','hackernews','news'];
 const CLOSED=['instagram','facebook','tiktok'];
-const OPEN_KEYS=['mastodon','lemmy','nostr','peertube','hackernews','news'];
+const OPEN_KEYS=['bluesky','mastodon','lemmy','nostr','peertube','hackernews','news'];
 const COV_BADGE={direct_official_api:'Direct API',direct_connected_account:'Connected account',
   direct_research_api:'Research API',direct_transparency_api:'Ads only',direct_licensed_provider:'Licensed feed',
   manual_import:'Manual import',open_web_reference:'Open-web reference',open_network_public:'Open network',
@@ -463,7 +484,7 @@ function renderTerms(tracked,counts){
   });
   $('termChips').querySelectorAll('.x').forEach(el=>el.onclick=async e=>{
     e.stopPropagation();const l=el.getAttribute('data-x');el.textContent='…';
-    try{await fetch('/api/keywords/remove?kw='+encodeURIComponent(l),{method:'POST'});}catch(_){}
+    try{await api('/api/keywords/remove?kw='+encodeURIComponent(l),{method:'POST'});}catch(_){}
     if(state.term===l)state.term='';refresh();
   });
 }
@@ -519,6 +540,21 @@ function renderCovMini(cov){
     `Manual imports: <b>${cov.manual_imports||0}</b><br>`+
     `Licensed feed: <b>${cov.licensed||0}</b>`+
     `<div class="disc">Discussed but not directly searched: ${disc}</div>`;
+}
+// Owner-authorized account analytics (impressions/reach) — NOT mentions/listening.
+function renderAccountInsights(d){
+  if(!d){$('acctInsights').innerHTML='';return;}
+  const row=(k,label)=>{
+    const x=d[k]; if(!x)return '';
+    if(!x.configured)return '<div class="ai-row"><b>'+label+'</b><span class="ai-gate">not connected</span><div class="ai-note">'+esc(x.note||'')+'</div></div>';
+    if(x.ok===false)return '<div class="ai-row"><b>'+label+'</b><span class="ai-gate">error</span><div class="ai-note">'+esc(x.error||'')+'</div></div>';
+    const ms=(x.metrics||[]).map(m=>'<span class="ai-metric"><span class="ai-num">'+fmt(m.total||0)+'</span> '+esc(m.title||m.metric)+'</span>').join('');
+    return '<div class="ai-row"><b>'+label+'</b><span class="ai-gate">connected</span>'+(ms?('<div>'+ms+'</div>'):'<div class="ai-note">No metrics returned for this range.</div>')+'</div>';
+  };
+  $('acctInsights').innerHTML=row('instagram','Instagram')+row('facebook','Facebook');
+}
+function loadAccountInsights(){
+  api('/api/insights/account?'+qstr()).then(r=>r.json()).then(renderAccountInsights).catch(()=>{$('acctInsights').innerHTML='';});
 }
 
 function feedHTML(rows){
@@ -579,7 +615,7 @@ async function refresh(){
   saveState();updateExports();
   $('lastCollected').textContent=lastCollectedAt?('Last collected '+fmtTime(lastCollectedAt)):'';
   try{
-    const m=await (await fetch('/api/metrics?'+qstr())).json();
+    const m=await (await api('/api/metrics?'+qstr())).json();
     const tracked=m.tracked||[];const trackedN=tracked.length;
     const cov=m.coverage||{};
     const noTerms=trackedN===0 && (m.kpis.totalMentions||0)===0;
@@ -596,7 +632,7 @@ async function refresh(){
       const sel=$('srcSel'),cur=state.source;
       sel.innerHTML='<option value="">All sources</option>'+(m.platforms||[]).map(p=>`<option value="${esc(p.platform)}">${esc(p.platform)}</option>`).join('');
       sel.value=cur;
-      lastFeed=await (await fetch('/api/mentions?limit=60&'+qstr())).json();
+      lastFeed=await (await api('/api/mentions?limit=60&'+qstr())).json();
       renderMentions();
     }
     setStatus((m.kpis.totalMentions||0)+' mention'+(m.kpis.totalMentions===1?'':'s')+' · '+(state.term||'all terms'));
@@ -619,7 +655,7 @@ $('srcSel').onchange=()=>{state.source=$('srcSel').value;saveState();renderMenti
 $('addBtn').onclick=async()=>{
   const q=$('q').value.trim();if(!q)return;if(!validate())return;
   $('addBtn').disabled=true;busy(true,'Adding "'+q+'" and collecting…');
-  try{await fetch('/api/keywords/add?q='+encodeURIComponent(q)+'&'+qstr(),{method:'POST'});$('q').value='';state.term=q;}
+  try{await api('/api/keywords/add?q='+encodeURIComponent(q)+'&'+qstr(),{method:'POST'});$('q').value='';state.term=q;}
   catch(_){busy(true,'Add failed');}
   $('addBtn').disabled=false;busy(false);refresh();
 };
@@ -654,7 +690,7 @@ async function endJob(j){
 function pollJob(){
   _poll=setTimeout(async()=>{
     try{
-      const j=await (await fetch('/api/jobs/'+_job)).json();
+      const j=await (await api('/api/jobs/'+_job)).json();
       if(j.error){busy(false);$('collectBtn').disabled=false;$('cancelBtn').style.display='none';_job=null;return;}
       busy(true,jobStatusText(j));refresh();
       if(['complete','failed','cancelled','rate_limited'].includes(j.status)){endJob(j);return;}
@@ -670,17 +706,17 @@ $('collectBtn').onclick=async()=>{
   $('collectBtn').disabled=true;$('cancelBtn').style.display='';busy(true,'Collecting live sources…');
   try{
     const term=state.term||'';
-    const r=await (await fetch('/api/collect?'+(term?('q='+encodeURIComponent(term)+'&'):'')+'mode='+mode+'&'+qstr(),{method:'POST'})).json();
+    const r=await (await api('/api/collect?'+(term?('q='+encodeURIComponent(term)+'&'):'')+'mode='+mode+'&'+qstr(),{method:'POST'})).json();
     if(r.error){busy(false);$('statusTxt').textContent=r.error;$('collectBtn').disabled=false;$('cancelBtn').style.display='none';return;}
     _job=r.job_id;pollJob();
   }catch(e){busy(false);$('statusTxt').textContent='Collect failed';$('collectBtn').disabled=false;$('cancelBtn').style.display='none';}
 };
-$('cancelBtn').onclick=async()=>{if(!_job)return;busy(true,'Stopping…');try{await fetch('/api/jobs/'+_job+'/cancel',{method:'POST'});}catch(_){}};
+$('cancelBtn').onclick=async()=>{if(!_job)return;busy(true,'Stopping…');try{await api('/api/jobs/'+_job+'/cancel',{method:'POST'});}catch(_){}};
 
 $('clearBtn').onclick=async()=>{
   if(!confirm('Clear the whole project? This removes all tracked terms and their mentions.'))return;
   state.term='';state.source='';busy(true,'Clearing project…');
-  try{await fetch('/api/keywords/clear',{method:'POST'});}catch(_){}
+  try{await api('/api/keywords/clear',{method:'POST'});}catch(_){}
   setTimeout(()=>busy(false),1000);refresh();
 };
 
@@ -697,7 +733,7 @@ async function openSources(){
   $('srcScrim').classList.add('open');$('srcDrawer').classList.add('open');lock(true);
   let ledHtml='';
   try{
-    const led=await (await fetch('/api/coverage?'+qstr())).json();const c=led.coverage||{};
+    const led=await (await api('/api/coverage?'+qstr())).json();const c=led.coverage||{};
     const searched=(c.platforms_searched||[]).map(d=>esc(d.platform)+' ('+d.count+')').join(', ')||'none';
     const disc=(c.platforms_discussed||[]).map(d=>esc(d.platform)+' ('+d.count+')').join(', ')||'none';
     const gated=(led.gated||[]).map(g=>'<li>'+esc(g.platform)+' — '+esc(g.status)+'</li>').join('')||'<li>none</li>';
@@ -707,7 +743,7 @@ async function openSources(){
       '<div class="sub">Directly searched: '+searched+'<br>Discussed but NOT directly searched: '+disc+'</div>'+
       '<div class="sub" style="margin-top:8px">Gated — not searched:<ul>'+gated+'</ul></div></div>';
   }catch(e){}
-  if(!matrixCache){try{matrixCache=(await (await fetch('/api/sources')).json()).sources;}catch(e){matrixCache=[];}}
+  if(!matrixCache){try{matrixCache=(await (await api('/api/sources')).json()).sources;}catch(e){matrixCache=[];}}
   const groups={};(matrixCache||[]).forEach(s=>{(groups[s.platform]=groups[s.platform]||[]).push(s);});
   $('srcList').innerHTML=ledHtml+PLAT_ORDER.filter(p=>groups[p]).map(p=>
     `<div class="grouphd">${esc(PLAT_NAMES[p]||p)}</div>`+
@@ -726,12 +762,22 @@ async function openAccounts(){
   $('acctScrim').classList.add('open');$('acctDrawer').classList.add('open');lock(true);
   $('acctList').innerHTML='<div class="empty" style="padding:20px">Loading…</div>';
   let data={accounts:[]};
-  try{data=await (await fetch('/api/accounts/status')).json();}catch(e){}
-  $('acctList').innerHTML=(data.accounts||[]).map(a=>{
+  try{data=await (await api('/api/accounts/status')).json();}catch(e){}
+  const et=data.env_targets||{};
+  const hostNote=data.deploy_note
+    ? '<div class="hostnote">'+esc(data.deploy_note)
+      +(et.local?'<br><b>Local:</b> '+esc(et.local):'')
+      +(et.production?'<br><b>Production:</b> '+esc(et.production):'')
+      +(data.app_mode?'<br>This server is running in <b>'+esc(data.app_mode)+'</b> mode.':'')
+      +'</div>'
+    : '';
+  $('acctList').innerHTML=hostNote+((data.accounts||[]).map(a=>{
     const can=a.can_collect?'<span class="ok">yes</span>':'<span class="bad">no</span>';
     const snip=(a.env_snippet&&a.env_snippet.length)?'<pre class="snip" id="snip-'+esc(a.source_key)+'">'+a.env_snippet.map(esc).join('\n')+'</pre>':'';
     const miss=(a.missing_env_vars&&a.missing_env_vars.length)?'<div class="miss">Missing: '+a.missing_env_vars.map(esc).join(', ')+'</div>':'';
-    const test=a.testable?'<button class="btn ghost" data-test="'+esc(a.source_key)+'">Test connection</button>':'';
+    const test=a.testable
+      ? '<button class="btn ghost" data-test="'+esc(a.source_key)+'">Test connection</button>'
+      : (a.action==='import' ? '' : '<span class="note">Adapter not implemented — gated</span>');
     const copy=snip?'<button class="btn quiet" data-copy="'+esc(a.source_key)+'">Copy .env names</button>':'';
     const imp=a.action==='import'?'<button class="btn ghost" data-doimport>Import data</button>':'';
     return '<div class="card"><div class="t">'+esc(a.platform)+'<span class="stt">'+esc(a.status)+'</span></div>'+
@@ -740,7 +786,7 @@ async function openAccounts(){
       '<div class="lim">Limitation: '+esc(a.limitation)+'</div>'+miss+snip+
       '<div class="acts">'+test+copy+imp+'<span class="lc">Last checked: '+fmtTime(a.last_checked_at)+'</span></div>'+
       '<div class="tres" id="tres-'+esc(a.source_key)+'"></div></div>';
-  }).join('')||'<div class="empty">No accounts.</div>';
+  }).join('')||'<div class="empty">No accounts.</div>');
   $('acctList').querySelectorAll('[data-test]').forEach(b=>b.onclick=()=>testAcct(b.getAttribute('data-test')));
   $('acctList').querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{
     const el=$('snip-'+b.getAttribute('data-copy'));
@@ -753,7 +799,7 @@ function closeAccounts(){$('acctScrim').classList.remove('open');$('acctDrawer')
 async function testAcct(key){
   const out=$('tres-'+key);out.textContent='Testing…';
   try{
-    const r=await (await fetch('/api/accounts/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source_key:key})})).json();
+    const r=await (await api('/api/accounts/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source_key:key})})).json();
     out.innerHTML='<span class="'+(r.ok?'ok':'bad')+'">'+(r.ok?'✓ ':'✗ ')+esc(r.message)+'</span>';
   }catch(e){out.innerHTML='<span class="bad">Test failed to run.</span>';}
 }
@@ -768,7 +814,7 @@ $('impDo').onclick=async()=>{
   if(!text){$('impMsg').textContent='Paste CSV or JSON first.';return;}
   $('impDo').disabled=true;$('impMsg').textContent='Importing…';
   try{
-    const r=await (await fetch('/api/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({term,text})})).json();
+    const r=await (await api('/api/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({term,text})})).json();
     $('impMsg').textContent='Imported '+r.imported+' rows.';state.term=term;
   }catch(e){$('impMsg').textContent='Import failed.';}
   $('impDo').disabled=false;setTimeout(closeImport,900);refresh();
@@ -778,7 +824,7 @@ $('impDo').onclick=async()=>{
 $('aiBtn').onclick=async()=>{
   $('aiBtn').disabled=true;$('aiOut').textContent='Generating internal insight…';
   try{
-    const r=await (await fetch('/api/ai/insights',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await (await api('/api/ai/insights',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({tracked_terms:state.term?[state.term]:[],platforms:state.source?[state.source]:[],start_date:state.start,end_date:state.end})})).json();
     if(r.error){$('aiOut').textContent=r.error;}
     else{$('aiOut').innerHTML='<b>'+esc(r.summary)+'</b>'+(r.key_themes&&r.key_themes.length?'<br>Themes: '+r.key_themes.map(esc).join(', '):'')+'<br><span style="color:var(--faint)">'+esc(r.coverage_note||'')+'</span>';}
@@ -791,13 +837,18 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeSources();clos
 
 /* ───────────────────────── init ───────────────────────── */
 loadState();syncInputs();validate();
-fetch('/api/sources').then(r=>r.json()).then(d=>{matrixCache=d.sources;renderSourceSummary(d.platforms||[]);}).catch(()=>{});
-fetch('/api/accounts/status').then(r=>r.json()).then(d=>{
-  if(d.internal_use)$('internalLabel').style.display='';
-  if(d.ai_enabled)$('aiRow').style.display='';
-}).catch(()=>{});
-refresh();
-setInterval(()=>{if($('runStat').dataset.busy!=='1'&&!_job)refresh();},25000);
+function boot(){
+  api('/api/sources').then(r=>r.json()).then(d=>{matrixCache=d.sources;renderSourceSummary(d.platforms||[]);}).catch(()=>{});
+  loadAccountInsights();
+  refresh();
+  setInterval(()=>{if($('runStat').dataset.busy!=='1'&&!_job)refresh();},25000);
+}
+// Read safe public config first (API base + feature flags), then start the app.
+api('/api/config').then(r=>r.json()).then(cfg=>{
+  if(cfg&&cfg.api_base)API_BASE=cfg.api_base;
+  if(cfg&&cfg.internal_use)$('internalLabel').style.display='';
+  if(cfg&&cfg.ai_enabled)$('aiRow').style.display='';
+}).catch(()=>{}).finally(boot);
 </script>
 </body>
 </html>

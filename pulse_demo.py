@@ -703,6 +703,25 @@ def _coverage_from_data(mentions):
              "kept": by_plat.get(s.platform, 0)} for s in pam.get_live_collectors()]
 
 
+def app_mode():
+    return os.getenv("APP_MODE") or ("production" if os.getenv("RENDER") else "local")
+
+
+def public_config():
+    """Safe, non-secret config the deployed frontend may read. NEVER contains
+    secret VALUES — only the API base URL (for split hosting), the app mode,
+    feature flags, and per-platform source statuses (already public elsewhere).
+    The frontend defaults to same-origin relative paths; api_base is only set
+    when PUBLIC_API_BASE_URL is configured (e.g. a separate static frontend)."""
+    return {
+        "api_base": (os.getenv("PUBLIC_API_BASE_URL", "") or "").rstrip("/"),
+        "app_mode": app_mode(),
+        "internal_use": internal_use(),
+        "ai_enabled": aip.enabled(),
+        "sources": pam.platform_summary(),
+    }
+
+
 # ── HTTP ─────────────────────────────────────────────────────────────────────
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
@@ -740,6 +759,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/health":
             return self._send({"status": "ok", "live": [s.key for s in pam.get_live_collectors()],
                                "tracked": [k["label"] for k in tracked_keywords()]})
+        if u.path == "/api/config":
+            return self._send(public_config())
         if u.path == "/api/sources":
             return self._send({"sources": [s.to_dict() for s in pam.get_source_matrix()],
                                "platforms": pam.platform_summary(),
@@ -747,7 +768,14 @@ class Handler(BaseHTTPRequestHandler):
                                "historical_modes": pam.HISTORICAL_MODES})
         if u.path == "/api/accounts/status":
             return self._send({"accounts": pam.accounts_status(), "env_path": "demo/.env",
-                               "internal_use": internal_use(), "ai_enabled": aip.enabled()})
+                               "internal_use": internal_use(), "ai_enabled": aip.enabled(),
+                               "app_mode": app_mode(),
+                               "env_targets": {
+                                   "local": "demo/.env (then restart the server)",
+                                   "production": "your host's environment variables — e.g. Render → Environment (then redeploy)"},
+                               "deploy_note": ("Credentials are server-side environment variables and never touch the "
+                                               "browser. Set them locally in demo/.env, or in production in your hosting "
+                                               "provider's environment settings.")})
         if u.path.startswith("/api/jobs/"):
             jid = u.path[len("/api/jobs/"):].strip("/")
             j = job_public(jid)
@@ -756,6 +784,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(metrics(one("keyword"), st, en))
         if u.path == "/api/coverage":
             return self._send(coverage_ledger(one("keyword"), st, en))
+        if u.path == "/api/insights/account":
+            return self._send(pam.account_insights(st, en))
         if u.path == "/api/mentions":
             return self._send(recent(int(one("limit") or 25), one("keyword"), one("platform"),
                                      one("sentiment"), st, en))

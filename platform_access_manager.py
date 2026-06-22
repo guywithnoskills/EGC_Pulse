@@ -367,6 +367,10 @@ CAPABILITY_MATRIX: Dict[str, ConnectorCapability] = {
         SourceStatus.LIVE, (HistoricalMode.RECENT_ONLY,), "None (public API)",
         allowed_data_types=("public_posts", "author", "score", "url"), date_range_support="recent (filter stored)",
         max_historical_lookback="Recent.", coverage_template="Lemmy public post search (recent)."),
+    "bluesky_public_api": _C("bluesky_public_api", "bluesky", "Bluesky Public API", AccessPath.OFFICIAL_API,
+        SourceStatus.LIVE, (HistoricalMode.RECENT_ONLY,), "None (public AT Protocol AppView)",
+        allowed_data_types=("public_posts", "author", "timestamp", "url"), date_range_support="recent (filter stored)",
+        max_historical_lookback="Recent public posts.", coverage_template="Bluesky public post search (recent)."),
     "nostr_public_relays": _C("nostr_public_relays", "nostr", "Nostr Public Relays", AccessPath.OFFICIAL_API,
         SourceStatus.LIVE, (HistoricalMode.RECENT_ONLY,), "None (public relays)",
         allowed_data_types=("public_notes", "pubkey", "timestamp", "url"), date_range_support="recent (filter stored)",
@@ -393,6 +397,7 @@ FETCHERS = {
     "x_full_archive": cc.collect_x,
     "mastodon_public_api": cc.collect_mastodon,
     "lemmy_public_api": cc.collect_lemmy,
+    "bluesky_public_api": cc.collect_bluesky,
     "nostr_public_relays": cc.collect_nostr,
     "peertube_public_search": cc.collect_peertube,
     "hackernews_public_api": cc.collect_hn,
@@ -447,6 +452,19 @@ def get_source_by_key(key: str) -> ResolvedSource:
 def get_live_collectors() -> List[ResolvedSource]:
     """Sources that can actually return data now AND have an implementing fetcher."""
     return [s for s in get_source_matrix() if s.can_collect and s.key in FETCHERS]
+
+
+def account_insights(start: Optional[str] = None, end: Optional[str] = None) -> Dict[str, Any]:
+    """Owner-authorized account analytics (impressions / reach / engagement).
+    This is separate from listening: it is NOT public mentions — it is a
+    connected account's own private metrics, available only because the owner
+    authorized this app. Returns a gated payload per platform until configured."""
+    return {
+        "instagram": cc.meta_account_insights(start, end),
+        "facebook": cc.facebook_page_insights(start, end),
+        "note": ("Owner-authorized account analytics only. Impressions & reach come from accounts that "
+                 "connected this app via the Meta Graph API — never third-party accounts, never scraped."),
+    }
 
 
 def platform_summary() -> List[Dict[str, Any]]:
@@ -511,26 +529,26 @@ ACCOUNTS = [
      "env_snippet": ("META_APP_ID=", "META_APP_SECRET=", "META_ACCESS_TOKEN=", "META_CONTENT_LIBRARY_ENABLED=false"),
      "setup": "Create a Meta app, then add META_APP_ID, META_APP_SECRET and META_ACCESS_TOKEN to demo/.env.",
      "limitation": "Owned accounts/Pages, Ad Library, or approved research access only — not broad public listening.",
-     "coverage": "Meta owned-account / Ad Library / approved research only.", "action": "meta", "testable": True},
+     "coverage": "Meta owned-account / Ad Library / approved research only.", "action": "meta", "testable": False},
     {"key": "instagram", "name": "Instagram", "access_path": "connected_account",
      "env_required": ("META_APP_ID", "META_APP_SECRET", "META_ACCESS_TOKEN"),
      "env_snippet": ("META_APP_ID=", "META_APP_SECRET=", "META_ACCESS_TOKEN="),
      "setup": "Connect an authorized Instagram Business/Creator account via the Meta Graph API (uses META_* values).",
      "limitation": "Not broad public Instagram listening unless a licensed provider exists. Open-web mentions of Instagram are not Instagram platform data.",
-     "coverage": "Instagram owned account / limited hashtag / licensed only.", "action": "meta", "testable": True},
+     "coverage": "Instagram owned account / limited hashtag / licensed only.", "action": "meta", "testable": False},
     {"key": "facebook", "name": "Facebook", "access_path": "connected_account",
      "env_required": ("META_APP_ID", "META_APP_SECRET", "META_ACCESS_TOKEN"),
      "env_snippet": ("META_APP_ID=", "META_APP_SECRET=", "META_ACCESS_TOKEN="),
      "setup": "Connect an owned Facebook Page via the Meta Graph API (uses META_* values).",
      "limitation": "Public Facebook listening requires approved research access or a licensed provider. Open-web mentions of Facebook are not Facebook platform data.",
-     "coverage": "Facebook owned Page / Ad Library / approved research only.", "action": "meta", "testable": True},
+     "coverage": "Facebook owned Page / Ad Library / approved research only.", "action": "meta", "testable": False},
     {"key": "tiktok", "name": "TikTok", "access_path": "connected_account",
      "env_required": ("TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET"),
      "env_snippet": ("TIKTOK_CLIENT_KEY=", "TIKTOK_CLIENT_SECRET=", "TIKTOK_ACCESS_TOKEN=",
                      "TIKTOK_RESEARCH_ENABLED=false", "TIKTOK_COMMERCIAL_CONTENT_ENABLED=false"),
      "setup": "Add TikTok app credentials and enable the access flags you are approved for.",
      "limitation": "No public TikTok scraping. Connected account, research approval, commercial content, or licensed provider only. Open-web mentions of TikTok are not TikTok platform data.",
-     "coverage": "TikTok connected account / research / commercial / licensed only.", "action": "tiktok", "testable": True},
+     "coverage": "TikTok connected account / research / commercial / licensed only.", "action": "tiktok", "testable": False},
     {"key": "licensed", "name": "Licensed provider", "access_path": "licensed_provider",
      "env_required": ("LICENSED_PROVIDER_API_KEY", "LICENSED_PROVIDER_URL"),
      "env_snippet": ("LICENSED_PROVIDER_API_KEY=", "LICENSED_PROVIDER_URL=", "LICENSED_PROVIDER_NAME=", "LICENSED_PROVIDER_PLATFORMS="),
