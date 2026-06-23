@@ -24,6 +24,7 @@ OPEN_NETWORK = "open_network_public"
 HISTORICAL_OPEN_WEB = "historical_open_web"
 UNAVAILABLE = "unavailable_compliantly"
 LIMITED = "limited_metadata"
+KNOWN_URL_ENRICHMENT = "known_url_enrichment"   # oEmbed of an already-known public URL (not a search)
 
 # coverage_type -> short UI badge
 BADGE = {
@@ -32,11 +33,12 @@ BADGE = {
     DIRECT_LICENSED: "Licensed feed", MANUAL: "Manual import",
     OPEN_WEB_REF: "Open-web reference", OPEN_NETWORK: "Open network",
     HISTORICAL_OPEN_WEB: "Historical open web", LIMITED: "Limited metadata",
-    UNAVAILABLE: "Unavailable",
+    UNAVAILABLE: "Unavailable", KNOWN_URL_ENRICHMENT: "oEmbed (known URL)",
 }
 
-# direct_platform_data is true for everything except open-web references / limited
-_NON_DIRECT = {OPEN_WEB_REF, HISTORICAL_OPEN_WEB, LIMITED, UNAVAILABLE}
+# direct_platform_data is true for everything except open-web references, known-URL
+# enrichment, and limited/unavailable. Open-web and oEmbed are NOT direct platform data.
+_NON_DIRECT = {OPEN_WEB_REF, HISTORICAL_OPEN_WEB, LIMITED, UNAVAILABLE, KNOWN_URL_ENRICHMENT}
 
 CLOSED_PLATFORMS = {"TikTok", "Instagram", "Facebook"}
 
@@ -133,6 +135,19 @@ SOURCE_TRUTH = {
     "licensed_provider_tiktok": dict(sp="licensed_tiktok", disp="Licensed Provider", searched="licensed provider (tiktok)",
                                      ct=DIRECT_LICENSED, conf="provider_supplied_licensed_feed",
                                      note="TikTok data supplied by a licensed provider."),
+    # ── compliant discovery layer (open web + known-URL enrichment) ──
+    "open_web_social_discovery": dict(sp="open_web_discovery", disp="Open Web / News", searched="open web",
+                                      ct=OPEN_WEB_REF, conf="source_verified_open_web_reference",
+                                      note="Open-web discovery result referencing a platform. It is not platform-native social data."),
+    "instagram_known_url_reference": dict(sp="open_web_discovery", disp="Open Web / News", searched="open web",
+                                          ct=OPEN_WEB_REF, conf="source_verified_open_web_reference",
+                                          note="Open-web result linking to Instagram. It is not Instagram platform data."),
+    "facebook_known_url_reference": dict(sp="open_web_discovery", disp="Open Web / News", searched="open web",
+                                         ct=OPEN_WEB_REF, conf="source_verified_open_web_reference",
+                                         note="Open-web result linking to Facebook. It is not Facebook platform data."),
+    "tiktok_oembed_known_url": dict(sp="tiktok_oembed", disp="TikTok URL", searched="known TikTok URL enrichment",
+                                    ct=KNOWN_URL_ENRICHMENT, conf="known_url_enrichment",
+                                    note="TikTok oEmbed enriches a known public video URL. It does not perform TikTok keyword search."),
 }
 
 # manual import: map a user-supplied platform label to a display bucket
@@ -162,6 +177,8 @@ def build_coverage_label(truth, discussed):
         if closed:
             return "Open-web article mentioning " + ", ".join(closed[:3])
         return "Open-web / news result"
+    if ct == KNOWN_URL_ENRICHMENT:
+        return "%s via oEmbed (known URL only)" % disp
     if ct == OPEN_NETWORK:
         return "%s public result" % disp
     if ct == DIRECT_OFFICIAL:
@@ -190,8 +207,10 @@ def build_coverage_note(truth, discussed):
 
 def normalize_mention_source(rec, ctx):
     """Attach source-truth fields to a raw mention record. ctx carries the
-    source_key (a platform_access_manager mode key) and optional overrides."""
-    key = ctx.get("source_key", "")
+    source_key (a platform_access_manager mode key). A per-record source_mode
+    (set by the discovery layer) takes precedence, so different results from one
+    run can carry different provenance (e.g. open-web reference vs oEmbed)."""
+    key = rec.get("source_mode") or ctx.get("source_key", "")
     if key in ("manual_import_csv", "manual_import_json", "manual"):
         raw = (ctx.get("manual_platform") or rec.get("platform") or "manual").lower()
         disp = _MANUAL_DISP.get(raw, "Manual Import")
@@ -215,6 +234,7 @@ def normalize_mention_source(rec, ctx):
     rec["coverage_note"] = build_coverage_note(truth, discussed)
     rec["access_path"] = ctx.get("access_path") or ""
     rec["source_key"] = key
+    rec["source_mode"] = key
     rec["confidence_level"] = truth["conf"]
     rec["run_id"] = ctx.get("run_id")
     return rec
@@ -260,7 +280,7 @@ def _as_list(v):
 
 
 EXPORT_FIELDS = ["tracked_term", "display_platform", "source_platform", "searched_platform",
-                 "discussed_platforms", "direct_platform_data", "platform_coverage_type",
+                 "discussed_platforms", "direct_platform_data", "platform_coverage_type", "source_mode",
                  "coverage_label", "coverage_note", "source_url", "posted_at", "author",
                  "sentiment", "engagement"]
 
@@ -274,6 +294,7 @@ def export_safe_mention(m):
         "discussed_platforms": ",".join(_as_list(m.get("discussed_platforms"))),
         "direct_platform_data": bool(m.get("direct_platform_data")),
         "platform_coverage_type": m.get("platform_coverage_type"),
+        "source_mode": m.get("source_mode") or m.get("source_key"),
         "coverage_label": m.get("coverage_label"), "coverage_note": m.get("coverage_note"),
         "source_url": m.get("url") or m.get("source_url"), "posted_at": m.get("posted_at"),
         "author": m.get("author"), "sentiment": m.get("sentiment"), "engagement": m.get("engagement"),

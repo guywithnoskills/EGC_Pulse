@@ -1,6 +1,9 @@
-# Render Blueprint for EGC Pulse — files live at the repo TOP LEVEL (flat).
-# Free tier: no credit card. A free service sleeps after ~15 min idle and resets
-# its data on restart. To keep data, see "PAID / PERSISTENT" at the bottom.
+# Render Blueprint for EGC Pulse.
+# This version is for a repo where the app files sit at the TOP LEVEL
+# (pulse_demo.py, Dockerfile, etc. in the root — not inside a demo/ folder).
+#
+# DEFAULT = FREE tier: no credit card. A free service sleeps after ~15 min idle
+# and its data resets on restart. To keep data permanently, see "PAID" at bottom.
 services:
   - type: web
     name: egc-pulse
@@ -14,15 +17,16 @@ services:
         value: "true"
       - key: AI_INSIGHTS_ENABLED
         value: "false"
-      # ── Secrets / connected-account values: set these in the Render dashboard
-      #    (Environment tab). `sync: false` means Render prompts for them and they
-      #    are NEVER stored in the repo. Leave blank to keep a source gated. ──
-      - key: META_ACCESS_TOKEN
+      # Open web social discovery (primary listening source). Provider name is not
+      # a secret; the API key is. SEARCH_CSE_ID is your Programmable Search Engine id.
+      - key: SEARCH_PROVIDER
+        value: "google_cse"
+      - key: SEARCH_API_KEY
         sync: false
-      - key: META_IG_USER_ID
+      - key: SEARCH_CSE_ID
         sync: false
-      - key: META_FB_PAGE_ID
-        sync: false
+      # Secrets — Render prompts for these; never stored in the repo. Leave blank
+      # to keep that source honestly gated (the app still runs on keyless sources).
       - key: REDDIT_CLIENT_ID
         sync: false
       - key: REDDIT_CLIENT_SECRET
@@ -34,6 +38,8 @@ services:
       - key: META_APP_ID
         sync: false
       - key: META_APP_SECRET
+        sync: false
+      - key: META_ACCESS_TOKEN
         sync: false
       - key: TIKTOK_CLIENT_KEY
         sync: false

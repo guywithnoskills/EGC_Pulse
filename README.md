@@ -32,7 +32,7 @@ server, and opens your browser — Chrome on macOS, sensible fallbacks elsewhere
 > Linux: `xdg-open http://localhost:8787` · Windows: `start http://localhost:8787`.
 > Change the port with `PORT=9000 python3 demo/pulse_demo.py serve`.
 
-No keys? Manual import and TikTok known-URL enrichment work with no provider key. The primary discovery source is Open web social discovery, which needs a server-side search provider key (`SEARCH_PROVIDER=brave`, `SEARCH_API_KEY`).
+No keys? Bluesky public search runs free and keyless, and Manual import plus TikTok known-URL enrichment also work with no provider key. The primary discovery source is Open web social discovery, which needs a server-side search provider key (`SEARCH_PROVIDER=brave`, `SEARCH_API_KEY`).
 
 ## Hosting
 
@@ -105,6 +105,7 @@ A ready-to-use Blueprint lives at the repo root: [`render.yaml`](../render.yaml)
 | Platform | Status without keys | How it becomes live |
 |---|---|---|
 | **Open web social discovery** (primary) | Requires search provider key | set `SEARCH_PROVIDER=brave` + `SEARCH_API_KEY` |
+| **Bluesky** | Live (keyless public API) | already available |
 | **Manual import** | Live (lawful uploads) | already available |
 | **TikTok known-URL enrichment** | Live (official oEmbed) | paste known TikTok video URLs |
 | **Reddit** | Requires API key | set `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` |

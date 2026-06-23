@@ -68,13 +68,14 @@ frontend, the repo, or the browser.
 
 ## What works without credentials
 
-Live with no provider key: **Manual import** of data you have the lawful right to
-upload, and **TikTok known-URL enrichment** (official oEmbed of known TikTok video
-URLs). The **primary discovery source is Open web social discovery**, which needs a
-server-side search provider key (`SEARCH_PROVIDER=brave`, `SEARCH_API_KEY`). The
-older open-network sources (Mastodon, Lemmy, Nostr, PeerTube, Hacker News,
-News/GDELT, and Bluesky) have been retired from the product experience; their
-connector code remains but is not collected, counted, or shown.
+Live with no provider key: **Bluesky** public search, **Manual import** of data you
+have the lawful right to upload, and **TikTok known-URL enrichment** (official
+oEmbed of known TikTok video URLs). The **primary discovery source is Open web
+social discovery**, which needs a server-side search provider key
+(`SEARCH_PROVIDER=brave`, `SEARCH_API_KEY`). The older open-network sources
+(Mastodon, Lemmy, Nostr, PeerTube, Hacker News, News/GDELT) have been retired from
+the product experience; their connector code remains but is not collected,
+counted, or shown.
 
 ## What requires credentials (real adapters)
 
@@ -102,10 +103,10 @@ never claims those platforms are "live" unless a compliant path is configured.
 ## Two different capabilities: listening vs. account analytics
 
 - **Listening** (mentions): *who is talking publicly* about a term. Sources:
-  open web social discovery (primary, when a search provider is configured),
-  Reddit and X (when their API keys are set), manual import, TikTok known-URL
-  enrichment, and a licensed provider if configured. Gives public posts, public
-  engagement, and sentiment. **Never** impressions or reach.
+  Bluesky, open web social discovery (primary, when a search provider is
+  configured), Reddit and X (when their API keys are set), manual import, TikTok
+  known-URL enrichment, and a licensed provider if configured. Gives public posts,
+  public engagement, and sentiment. **Never** impressions or reach.
 - **Account analytics** (impressions / reach / engagement): a connected account's
   **own private metrics**. These are visible only to the owner, so they are only
   available for accounts that authorize this app. Endpoint: `GET /api/insights/account`.

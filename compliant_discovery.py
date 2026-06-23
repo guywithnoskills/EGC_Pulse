@@ -156,7 +156,12 @@ def build_open_web_queries(term, hashtags=None, platforms=None):
 
 # ── open web search provider adapter (GATED; official APIs only) ─────────────
 def search_provider_configured():
-    return bool(os.getenv("SEARCH_API_KEY") and (os.getenv("SEARCH_API_ENDPOINT") or os.getenv("SEARCH_PROVIDER")))
+    if not os.getenv("SEARCH_API_KEY"):
+        return False
+    provider = (os.getenv("SEARCH_PROVIDER") or "").strip().lower()
+    if provider == "google_cse" and not os.getenv("SEARCH_CSE_ID"):
+        return False  # Google CSE also requires the Programmable Search Engine ID (cx)
+    return bool(provider or os.getenv("SEARCH_API_ENDPOINT"))
 
 
 def search_provider_status():
@@ -175,14 +180,23 @@ def discovery_status():
     Reports only booleans and the provider NAME. The SEARCH_API_KEY value is
     never read into the response."""
     provider = (os.getenv("SEARCH_PROVIDER") or "").strip().lower()
+    key = bool(os.getenv("SEARCH_API_KEY"))
+    cse = bool(os.getenv("SEARCH_CSE_ID"))
     can = search_provider_configured()
+    msg = None
+    if not can:
+        if provider == "google_cse" and key and not cse:
+            msg = "Google CSE also needs SEARCH_CSE_ID (your Programmable Search Engine ID)."
+        else:
+            msg = "Open web social discovery requires a server-side search provider key."
     return {
         "provider": _PROVIDER_NAMES.get(provider, provider.title()) if provider else None,
         "provider_configured": bool(provider),
-        "key_configured": bool(os.getenv("SEARCH_API_KEY")),
+        "key_configured": key,
         "endpoint_configured": bool(os.getenv("SEARCH_API_ENDPOINT")),
+        "cse_id_configured": cse,
         "can_collect": can,
-        "message": None if can else "Open web social discovery requires a server-side search provider key.",
+        "message": msg,
     }
 
 

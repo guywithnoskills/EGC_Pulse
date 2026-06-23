@@ -388,7 +388,7 @@ def manual_import(term, text="", rows=None):
 # Retired open-network platforms are hidden from the product experience (feed,
 # metrics, top sources, exports, coverage). Their connector code remains, but
 # stored rows from them are not surfaced as active listening data.
-_HIDDEN_PLATFORMS = ("mastodon", "lemmy", "nostr", "peertube", "hackernews", "news", "bluesky")
+_HIDDEN_PLATFORMS = ("mastodon", "lemmy", "nostr", "peertube", "hackernews", "news")
 
 
 def _filters(keyword=None, start=None, end=None):

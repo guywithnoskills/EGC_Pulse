@@ -455,8 +455,7 @@ def resolve_source(cap: ConnectorCapability) -> ResolvedSource:
 # stays in compliant_connectors.py, but these are no longer shown, counted, or
 # collected by default. Open web social discovery replaces this group.
 HIDDEN_SOURCE_KEYS = {"mastodon_public_api", "lemmy_public_api", "nostr_public_relays",
-                      "peertube_public_search", "hackernews_public_api", "news_gdelt",
-                      "bluesky_public_api"}
+                      "peertube_public_search", "hackernews_public_api", "news_gdelt"}
 
 
 def get_source_matrix() -> List[ResolvedSource]:
@@ -577,10 +576,11 @@ ACCOUNTS = [
      "coverage": "Public listening via licensed provider under contract scope.", "action": "env", "testable": True},
     {"key": "open_web", "name": "Open web social discovery", "access_path": "official_api",
      "env_required": ("SEARCH_PROVIDER", "SEARCH_API_KEY"),
-     "env_snippet": ("SEARCH_PROVIDER=brave", "SEARCH_API_KEY=", "# SEARCH_API_ENDPOINT= (only for a custom provider)"),
-     "setup": "Open web social discovery requires a server-side search provider key. For Brave, set "
-              "SEARCH_PROVIDER=brave and SEARCH_API_KEY, then restart or redeploy. Bing, Google CSE, and SerpAPI "
-              "are also supported. The key is never exposed to the browser.",
+     "env_snippet": ("SEARCH_PROVIDER=google_cse", "SEARCH_API_KEY=", "SEARCH_CSE_ID=  (Programmable Search Engine ID)"),
+     "setup": "Open web social discovery needs a server-side search provider key. Google Custom Search has a free "
+              "tier (100 queries/day): set SEARCH_PROVIDER=google_cse, SEARCH_API_KEY (Google Cloud API key), and "
+              "SEARCH_CSE_ID (Programmable Search Engine ID). Brave is also supported (SEARCH_PROVIDER=brave + "
+              "SEARCH_API_KEY). Restart or redeploy. The key is never exposed to the browser.",
      "limitation": "Finds open web pages and known URLs that reference Instagram, Facebook, or TikTok. "
                    "This is not direct platform listening. Open web mentions of a platform are not that platform's native data.",
      "coverage": "Open web discovery via a configured search provider API.", "action": "env", "testable": True},
