@@ -1,12 +1,12 @@
 """
 platform_access_manager.py
 
-Compliance-first source access manager for social listening — the LEGAL ACCESS
+Compliance-first source access manager for social listening. The LEGAL ACCESS
 LADDER. It decides the highest available compliant path per platform from
 configured env vars, exposes honest statuses + coverage disclosures, and
 dispatches collection to the real fetchers in compliant_connectors.py.
 
-Rules (enforced by design — there is no code path that does otherwise):
+Rules (enforced by design. There is no code path that does otherwise):
 - No closed-platform scraping, headless browsers, fake accounts, session
   cookies, private/unofficial APIs, or rate-limit/auth/app-review evasion.
 - Prefer official APIs → connected accounts → approved research APIs →
@@ -25,6 +25,7 @@ import os
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import compliant_connectors as cc
+import compliant_discovery as cd
 
 
 class SourceStatus(str, Enum):
@@ -237,13 +238,13 @@ CAPABILITY_MATRIX: Dict[str, ConnectorCapability] = {
         coverage_template="X searched full archive for the selected date range."),
 
     # Meta (cross IG+FB)
-    "meta_graph_owned_account": _C("meta_graph_owned_account", "meta", "Meta Graph — Owned Account", AccessPath.CONNECTED_ACCOUNT,
+    "meta_graph_owned_account": _C("meta_graph_owned_account", "meta", "Meta Graph. Owned Account", AccessPath.CONNECTED_ACCOUNT,
         SourceStatus.REQUIRES_CONNECTED_ACCOUNT, (HistoricalMode.CONNECTED_ACCOUNT_HISTORY,), "Meta Graph API user/page token",
         env_required=("META_APP_ID", "META_APP_SECRET", "META_ACCESS_TOKEN"),
         allowed_data_types=("owned_ig_business", "owned_fb_pages", "posts", "insights", "comments_if_permissioned"),
         date_range_support="connected/owned account only", max_historical_lookback="Token/permission/app-review dependent.",
         required_permissions=("instagram_basic", "pages_read_engagement", "pages_show_list", "read_insights"),
-        coverage_template="Meta searched connected owned accounts only — not broad public listening."),
+        coverage_template="Meta searched connected owned accounts only. Not broad public listening."),
     "meta_content_library_research": _C("meta_content_library_research", "meta", "Meta Content Library (Research)", AccessPath.APPROVED_RESEARCH_API,
         SourceStatus.REQUIRES_APPROVED_RESEARCH_ACCESS, (HistoricalMode.RESEARCH_API,), "Approved Meta Content Library access",
         env_required=("META_ACCESS_TOKEN",), flag_env="META_CONTENT_LIBRARY_ENABLED",
@@ -255,8 +256,8 @@ CAPABILITY_MATRIX: Dict[str, ConnectorCapability] = {
         env_required=("META_ACCESS_TOKEN",),
         allowed_data_types=("ads", "page_id", "page_name", "ad_snapshot_url", "delivery_dates", "platforms"),
         date_range_support="ad delivery date min/max (ads only)", max_historical_lookback="Ad Library policy dependent.",
-        coverage_template="Meta Ad Library searched ads only — not organic public posts."),
-    "licensed_provider_meta": _C("licensed_provider_meta", "meta", "Licensed Provider — Meta", AccessPath.LICENSED_PROVIDER,
+        coverage_template="Meta Ad Library searched ads only. Not organic public posts."),
+    "licensed_provider_meta": _C("licensed_provider_meta", "meta", "Licensed Provider. Meta", AccessPath.LICENSED_PROVIDER,
         SourceStatus.REQUIRES_LICENSED_DATA_PROVIDER, (HistoricalMode.LICENSED_ARCHIVE,), "Licensed provider contract/API",
         env_required=("LICENSED_PROVIDER_API_KEY", "LICENSED_PROVIDER_URL"),
         allowed_data_types=("provider_permitted_public_data", "source_url", "source_id", "engagement"),
@@ -264,7 +265,7 @@ CAPABILITY_MATRIX: Dict[str, ConnectorCapability] = {
         coverage_template="Meta public listening via licensed provider under configured license scope."),
 
     # Instagram
-    "instagram_graph_owned_account": _C("instagram_graph_owned_account", "instagram", "Instagram Graph — Owned Account", AccessPath.CONNECTED_ACCOUNT,
+    "instagram_graph_owned_account": _C("instagram_graph_owned_account", "instagram", "Instagram Graph. Owned Account", AccessPath.CONNECTED_ACCOUNT,
         SourceStatus.REQUIRES_CONNECTED_ACCOUNT, (HistoricalMode.CONNECTED_ACCOUNT_HISTORY,), "IG Graph API Business/Creator token",
         env_required=("META_APP_ID", "META_APP_SECRET", "META_ACCESS_TOKEN"),
         allowed_data_types=("owned_media", "owned_insights", "comments_if_permissioned"),
@@ -283,7 +284,7 @@ CAPABILITY_MATRIX: Dict[str, ConnectorCapability] = {
         allowed_data_types=("approved_research_public_ig_content",), date_range_support="research query environment",
         max_historical_lookback="Per approved project + Meta terms.",
         coverage_template="Instagram public research data requires Meta Content Library approval."),
-    "licensed_provider_instagram": _C("licensed_provider_instagram", "instagram", "Licensed Provider — Instagram", AccessPath.LICENSED_PROVIDER,
+    "licensed_provider_instagram": _C("licensed_provider_instagram", "instagram", "Licensed Provider. Instagram", AccessPath.LICENSED_PROVIDER,
         SourceStatus.REQUIRES_LICENSED_DATA_PROVIDER, (HistoricalMode.LICENSED_ARCHIVE,), "Licensed provider contract/API",
         env_required=("LICENSED_PROVIDER_API_KEY", "LICENSED_PROVIDER_URL"),
         allowed_data_types=("provider_permitted_public_ig_data", "source_url", "source_id", "engagement"),
@@ -291,7 +292,7 @@ CAPABILITY_MATRIX: Dict[str, ConnectorCapability] = {
         coverage_template="Instagram public data via licensed provider under configured license scope."),
 
     # Facebook
-    "facebook_page_owned_account": _C("facebook_page_owned_account", "facebook", "Facebook Page — Owned Account", AccessPath.CONNECTED_ACCOUNT,
+    "facebook_page_owned_account": _C("facebook_page_owned_account", "facebook", "Facebook Page. Owned Account", AccessPath.CONNECTED_ACCOUNT,
         SourceStatus.REQUIRES_CONNECTED_ACCOUNT, (HistoricalMode.CONNECTED_ACCOUNT_HISTORY,), "Meta Graph API Page token",
         env_required=("META_APP_ID", "META_APP_SECRET", "META_ACCESS_TOKEN"),
         allowed_data_types=("owned_page_posts", "page_insights", "comments_if_permissioned"),
@@ -309,8 +310,8 @@ CAPABILITY_MATRIX: Dict[str, ConnectorCapability] = {
         env_required=("META_ACCESS_TOKEN",),
         allowed_data_types=("ads", "page_id", "page_name", "ad_snapshot_url", "delivery_dates"),
         date_range_support="ad delivery date min/max (ads only)", max_historical_lookback="Ad Library policy dependent.",
-        coverage_template="Facebook/Meta Ad Library searched ads only — not organic public posts."),
-    "licensed_provider_facebook": _C("licensed_provider_facebook", "facebook", "Licensed Provider — Facebook", AccessPath.LICENSED_PROVIDER,
+        coverage_template="Facebook/Meta Ad Library searched ads only. Not organic public posts."),
+    "licensed_provider_facebook": _C("licensed_provider_facebook", "facebook", "Licensed Provider. Facebook", AccessPath.LICENSED_PROVIDER,
         SourceStatus.REQUIRES_LICENSED_DATA_PROVIDER, (HistoricalMode.LICENSED_ARCHIVE,), "Licensed provider contract/API",
         env_required=("LICENSED_PROVIDER_API_KEY", "LICENSED_PROVIDER_URL"),
         allowed_data_types=("provider_permitted_public_fb_data", "source_url", "source_id", "engagement"),
@@ -318,7 +319,7 @@ CAPABILITY_MATRIX: Dict[str, ConnectorCapability] = {
         coverage_template="Facebook public data via licensed provider under configured license scope."),
 
     # TikTok
-    "tiktok_display_connected_account": _C("tiktok_display_connected_account", "tiktok", "TikTok Display — Connected Account", AccessPath.CONNECTED_ACCOUNT,
+    "tiktok_display_connected_account": _C("tiktok_display_connected_account", "tiktok", "TikTok Display. Connected Account", AccessPath.CONNECTED_ACCOUNT,
         SourceStatus.REQUIRES_CONNECTED_ACCOUNT, (HistoricalMode.CONNECTED_ACCOUNT_HISTORY,), "TikTok OAuth connected account",
         env_required=("TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET", "TIKTOK_ACCESS_TOKEN"),
         allowed_data_types=("authorized_creator_profile", "authorized_creator_videos"),
@@ -339,7 +340,7 @@ CAPABILITY_MATRIX: Dict[str, ConnectorCapability] = {
         date_range_support="commercial content published date range", max_window_days=31,
         max_historical_lookback="Commercial Content API availability dependent.",
         coverage_template="TikTok Commercial Content API searched commercial content only."),
-    "licensed_provider_tiktok": _C("licensed_provider_tiktok", "tiktok", "Licensed Provider — TikTok", AccessPath.LICENSED_PROVIDER,
+    "licensed_provider_tiktok": _C("licensed_provider_tiktok", "tiktok", "Licensed Provider. TikTok", AccessPath.LICENSED_PROVIDER,
         SourceStatus.REQUIRES_LICENSED_DATA_PROVIDER, (HistoricalMode.LICENSED_ARCHIVE,), "Licensed provider contract/API",
         env_required=("LICENSED_PROVIDER_API_KEY", "LICENSED_PROVIDER_URL"),
         allowed_data_types=("provider_permitted_public_tiktok_data", "source_url", "source_id", "engagement"),
@@ -387,6 +388,16 @@ CAPABILITY_MATRIX: Dict[str, ConnectorCapability] = {
         SourceStatus.LIVE, (HistoricalMode.RECENT_ONLY,), "None (GDELT)",
         allowed_data_types=("news_articles", "domain", "lang", "url"), date_range_support="recent window",
         max_historical_lookback="Rolling recent window.", coverage_template="Global news (GDELT), recent window."),
+    # Compliant open-web discovery: finds public pages that reference a platform.
+    # Gated until a search provider API is configured (SEARCH_PROVIDER + SEARCH_API_KEY).
+    "open_web_social_discovery": _C("open_web_social_discovery", "open_web", "Open web social discovery", AccessPath.OFFICIAL_API,
+        SourceStatus.REQUIRES_API_KEY, (HistoricalMode.RECENT_ONLY,), "Search provider API key (SEARCH_API_KEY)",
+        env_required=("SEARCH_PROVIDER", "SEARCH_API_KEY"),
+        allowed_data_types=("open_web_pages", "title", "url", "discussed_platform"), date_range_support="recent (filter stored)",
+        max_historical_lookback="Depends on the search provider index.", can_resell=False,
+        coverage_template="Finds open web pages and known URLs that reference Instagram, Facebook, or TikTok. "
+                          "This is not direct platform listening. Requires a search provider API key "
+                          "(SEARCH_PROVIDER, SEARCH_API_KEY). Open web mentions of a platform are not that platform's native data."),
 }
 
 
@@ -407,8 +418,9 @@ FETCHERS = {
     "licensed_provider_instagram": lambda term, s, e: cc._licensed("instagram", term, s, e, 40),
     "licensed_provider_facebook": lambda term, s, e: cc._licensed("facebook", term, s, e, 40),
     "licensed_provider_tiktok": lambda term, s, e: cc._licensed("tiktok", term, s, e, 40),
+    "open_web_social_discovery": lambda term, s, e: cd.collect_open_web_discovery(term, s, e),
     # owned-account / research / ads / commercial modes have no public fetcher in
-    # this demo — they activate with real credentials + an implementing adapter.
+    # this demo. They activate with real credentials + an implementing adapter.
 }
 
 _EASE = [SourceStatus.LIVE, SourceStatus.REQUIRES_API_KEY, SourceStatus.REQUIRES_CONNECTED_ACCOUNT,
@@ -439,8 +451,16 @@ def resolve_source(cap: ConnectorCapability) -> ResolvedSource:
         can_resell=cap.can_resell, notes=cap.notes)
 
 
+# Open-network sources retired from the product experience. The connector code
+# stays in compliant_connectors.py, but these are no longer shown, counted, or
+# collected by default. Open web social discovery replaces this group.
+HIDDEN_SOURCE_KEYS = {"mastodon_public_api", "lemmy_public_api", "nostr_public_relays",
+                      "peertube_public_search", "hackernews_public_api", "news_gdelt",
+                      "bluesky_public_api"}
+
+
 def get_source_matrix() -> List[ResolvedSource]:
-    return [resolve_source(c) for c in CAPABILITY_MATRIX.values()]
+    return [resolve_source(c) for c in CAPABILITY_MATRIX.values() if c.key not in HIDDEN_SOURCE_KEYS]
 
 
 def get_source_by_key(key: str) -> ResolvedSource:
@@ -456,14 +476,14 @@ def get_live_collectors() -> List[ResolvedSource]:
 
 def account_insights(start: Optional[str] = None, end: Optional[str] = None) -> Dict[str, Any]:
     """Owner-authorized account analytics (impressions / reach / engagement).
-    This is separate from listening: it is NOT public mentions — it is a
+    This is separate from listening: it is NOT public mentions. It is a
     connected account's own private metrics, available only because the owner
     authorized this app. Returns a gated payload per platform until configured."""
     return {
         "instagram": cc.meta_account_insights(start, end),
         "facebook": cc.facebook_page_insights(start, end),
         "note": ("Owner-authorized account analytics only. Impressions & reach come from accounts that "
-                 "connected this app via the Meta Graph API — never third-party accounts, never scraped."),
+                 "connected this app via the Meta Graph API. Never third-party accounts, never scraped."),
     }
 
 
@@ -528,7 +548,7 @@ ACCOUNTS = [
      "env_required": ("META_APP_ID", "META_APP_SECRET", "META_ACCESS_TOKEN"),
      "env_snippet": ("META_APP_ID=", "META_APP_SECRET=", "META_ACCESS_TOKEN=", "META_CONTENT_LIBRARY_ENABLED=false"),
      "setup": "Create a Meta app, then add META_APP_ID, META_APP_SECRET and META_ACCESS_TOKEN to demo/.env.",
-     "limitation": "Owned accounts/Pages, Ad Library, or approved research access only — not broad public listening.",
+     "limitation": "Owned accounts/Pages, Ad Library, or approved research access only. Not broad public listening.",
      "coverage": "Meta owned-account / Ad Library / approved research only.", "action": "meta", "testable": False},
     {"key": "instagram", "name": "Instagram", "access_path": "connected_account",
      "env_required": ("META_APP_ID", "META_APP_SECRET", "META_ACCESS_TOKEN"),
@@ -555,6 +575,15 @@ ACCOUNTS = [
      "setup": "Add LICENSED_PROVIDER_API_KEY and LICENSED_PROVIDER_URL to demo/.env, then restart.",
      "limitation": "Coverage depends on your provider contract.",
      "coverage": "Public listening via licensed provider under contract scope.", "action": "env", "testable": True},
+    {"key": "open_web", "name": "Open web social discovery", "access_path": "official_api",
+     "env_required": ("SEARCH_PROVIDER", "SEARCH_API_KEY"),
+     "env_snippet": ("SEARCH_PROVIDER=brave", "SEARCH_API_KEY=", "# SEARCH_API_ENDPOINT= (only for a custom provider)"),
+     "setup": "Open web social discovery requires a server-side search provider key. For Brave, set "
+              "SEARCH_PROVIDER=brave and SEARCH_API_KEY, then restart or redeploy. Bing, Google CSE, and SerpAPI "
+              "are also supported. The key is never exposed to the browser.",
+     "limitation": "Finds open web pages and known URLs that reference Instagram, Facebook, or TikTok. "
+                   "This is not direct platform listening. Open web mentions of a platform are not that platform's native data.",
+     "coverage": "Open web discovery via a configured search provider API.", "action": "env", "testable": True},
     {"key": "manual", "name": "Manual import", "access_path": "manual_import",
      "env_required": (), "env_snippet": (),
      "setup": "Upload CSV/JSON data you have the lawful right to use (use Import data).",
@@ -574,16 +603,18 @@ def _account_status(key, configured):
         return SourceStatus.LIVE.value if _all_env_present(_LICENSED_OK) else "Requires connected account, research approval, commercial content access, or licensed provider"
     if key == "licensed":
         return SourceStatus.LIVE.value if configured else SourceStatus.REQUIRES_LICENSED_DATA_PROVIDER.value
+    if key == "open_web":
+        return SourceStatus.LIVE.value if configured else SourceStatus.REQUIRES_API_KEY.value
     return SourceStatus.LIVE.value  # manual
 
 
 def _account_can_collect(key, configured):
-    if key in ("reddit", "x", "licensed"):
+    if key in ("reddit", "x", "licensed", "open_web"):
         return configured
     if key == "manual":
         return True
     # meta/instagram/facebook/tiktok owned/research/ads adapters are not
-    # implemented in this demo (gated) — they never silently "collect".
+    # implemented in this demo (gated). They never silently "collect".
     return False
 
 

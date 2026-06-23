@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-EGC Pulse — compliant social listening (zero-infra demo, pure stdlib).
+EGC Pulse. Compliant social listening (zero-infra demo, pure stdlib).
 
 Pipeline: collect (via compliant_connectors) -> enrich (sentiment) -> dedupe ->
 relevance filter -> store -> REST API -> grayscale dashboard.
 
-Real data only — no synthetic fill. Sources, statuses, and date/historical
+Real data only. No synthetic fill. Sources, statuses, and date/historical
 behavior are governed by compliant_connectors.py. See COMPLIANT_CONNECTORS.md.
 
 Usage:
@@ -32,6 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import platform_access_manager as pam
 import ai_policy as aip
 import source_truth as struth
+import compliant_discovery as cd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # DB lives next to the app by default; override with PULSE_DB to point at a
@@ -108,6 +109,31 @@ def clear_project():
     save_keywords([])
     with db() as c:
         c.execute("DELETE FROM mentions")
+        c.execute("DELETE FROM manual_insights")
+
+
+def add_manual_insight(platform, period, impressions, reach, engagement=0, note=""):
+    plat = (platform or "instagram").strip().lower()
+    if plat not in ("instagram", "facebook"):
+        plat = "instagram"
+    def _int(v):
+        try:
+            return int(float(str(v).replace(",", "").strip() or 0))
+        except Exception:
+            return 0
+    with db() as c:
+        c.execute("INSERT INTO manual_insights (platform, period, impressions, reach, engagement, note, created_at)"
+                  " VALUES (?,?,?,?,?,?,?)",
+                  (plat, (period or "").strip(), _int(impressions), _int(reach), _int(engagement),
+                   (note or "").strip(), now_iso()))
+    return True
+
+
+def get_manual_insights():
+    with db() as c:
+        rows = c.execute("SELECT platform, period, impressions, reach, engagement, note, created_at"
+                         " FROM manual_insights ORDER BY id DESC").fetchall()
+    return [dict(r) for r in rows]
 
 
 _re_cache = {}
@@ -177,6 +203,12 @@ def init_db():
               engagement INTEGER DEFAULT 0, sentiment TEXT, sentiment_score REAL,
               is_hidden INTEGER DEFAULT 0, UNIQUE(platform, platform_post_id, keyword))""")
         c.execute("CREATE TABLE IF NOT EXISTS suppression (platform TEXT, id_hash TEXT, PRIMARY KEY (platform, id_hash))")
+        # Owner-entered account analytics (impressions/reach typed from the user's
+        # own Instagram/Facebook Insights). Lawful, user-provided, labeled manual.
+        c.execute("""CREATE TABLE IF NOT EXISTS manual_insights (
+              id INTEGER PRIMARY KEY AUTOINCREMENT, platform TEXT NOT NULL, period TEXT,
+              impressions INTEGER DEFAULT 0, reach INTEGER DEFAULT 0, engagement INTEGER DEFAULT 0,
+              note TEXT, created_at TEXT NOT NULL)""")
         cols = [r["name"] for r in c.execute("PRAGMA table_info(mentions)")]
         if "posted_date" not in cols:  # migrate older DBs
             c.execute("ALTER TABLE mentions ADD COLUMN posted_date TEXT")
@@ -201,7 +233,7 @@ def _backfill_source_truth(c):
     """Conservative provenance for rows that predate the source-truth layer."""
     rules = [
         ("news", "Open Web / News", "gdelt", "open web / news", 0, "open_web_reference",
-         "Open-web / news result", "Open-web/news source that references a platform — not platform-native data.", "source_verified_open_web_reference"),
+         "Open-web / news result", "Open-web/news source that references a platform. Not platform-native data.", "source_verified_open_web_reference"),
         ("hackernews", "Hacker News", "hacker_news", "hacker news", 1, "open_network_public",
          "Hacker News result", "Hacker News public API result.", "source_verified_direct_platform"),
         ("mastodon", "Mastodon", "mastodon", "mastodon public api", 1, "open_network_public",
@@ -213,11 +245,11 @@ def _backfill_source_truth(c):
         ("peertube", "PeerTube", "peertube", "peertube search", 1, "open_network_public",
          "PeerTube result", "PeerTube federated video result.", "source_verified_direct_platform"),
         ("reddit", "Reddit", "reddit", "reddit official api", 1, "direct_official_api",
-         "Reddit official API result", "Reddit official API result — direct platform data.", "source_verified_direct_platform"),
+         "Reddit official API result", "Reddit official API result. Direct platform data.", "source_verified_direct_platform"),
         ("x", "X / Twitter", "x", "x recent search", 1, "direct_official_api",
          "X official API result", "X official API result.", "source_verified_direct_platform"),
         ("manual", "Manual Import", "manual_import", "manual import", 1, "manual_import",
-         "Manual import — user-provided data", "User-provided data only. User is responsible for lawful upload rights.", "user_supplied_manual_import"),
+         "Manual import. User-provided data", "User-provided data only. User is responsible for lawful upload rights.", "user_supplied_manual_import"),
     ]
     for plat, disp, sp, searched, direct, ct, label, note, conf in rules:
         c.execute("UPDATE mentions SET display_platform=?, source_platform=?, searched_platform=?, "
@@ -320,7 +352,7 @@ def backfill(keyword, start=None, end=None, historical_mode="recent_only"):
 
 def manual_import(term, text="", rows=None):
     """Ingest user-supplied data the user has lawful rights to upload (CSV or
-    JSON). This is the compliant 'manual_import' access path — never scraping."""
+    JSON). This is the compliant 'manual_import' access path. Never scraping."""
     items = rows
     if items is None and text:
         t = text.strip()
@@ -353,8 +385,15 @@ def manual_import(term, text="", rows=None):
 
 
 # ── metrics / feed / exports (all date-range aware) ──────────────────────────
+# Retired open-network platforms are hidden from the product experience (feed,
+# metrics, top sources, exports, coverage). Their connector code remains, but
+# stored rows from them are not surfaced as active listening data.
+_HIDDEN_PLATFORMS = ("mastodon", "lemmy", "nostr", "peertube", "hackernews", "news", "bluesky")
+
+
 def _filters(keyword=None, start=None, end=None):
-    clauses, params = ["is_hidden=0"], []
+    clauses = ["is_hidden=0", "platform NOT IN (%s)" % ",".join("'%s'" % p for p in _HIDDEN_PLATFORMS)]
+    params = []
     if keyword:
         clauses.append("keyword = ?"); params.append(keyword)
     if start:
@@ -438,7 +477,7 @@ def export_csv(keyword=None, start=None, end=None):
     with db() as c:
         rows = [dict(r) for r in c.execute(
             "SELECT keyword, display_platform, source_platform, searched_platform, discussed_platforms, "
-            "direct_platform_data, platform_coverage_type, coverage_label, coverage_note, url, posted_at, "
+            "direct_platform_data, platform_coverage_type, source_key, coverage_label, coverage_note, url, posted_at, "
             "author, sentiment, engagement, content FROM mentions WHERE " + where
             + " ORDER BY posted_at DESC", params).fetchall()]
     buf = io.StringIO()
@@ -470,12 +509,12 @@ def report_html(keyword=None, start=None, end=None):
         return (str(x) if x is not None else "").replace("&", "&amp;").replace("<", "&lt;")
     cov = m["coverage"]
     plat = "".join("<tr><td>%s</td><td style='text-align:right'>%d</td></tr>" % (e(p["platform"]), p["value"]) for p in m["platforms"]) or "<tr><td>none</td></tr>"
-    feed = "".join("<li><a href='%s'>%s</a> <span style='color:#777'>— %s · %s</span></li>"
+    feed = "".join("<li><a href='%s'>%s</a> <span style='color:#777'>. %s · %s</span></li>"
                    % (e(r["url"] or "#"), e((r["content"] or "")[:140]), e(r.get("coverage_label") or r.get("display_platform")), e(r["sentiment"])) for r in rows) or "<li>none</li>"
     searched = ", ".join("%s (%d)" % (e(d["platform"]), d["count"]) for d in cov["platforms_searched"]) or "none"
     disc = ", ".join("%s (%d)" % (e(d["platform"]), d["count"]) for d in cov["platforms_discussed"]) or "none"
     gated = [a for a in pam.accounts_status() if a["source_key"] != "manual" and not a["can_collect"]]
-    gated_html = "".join("<li>%s — %s</li>" % (e(a["platform"]), e(a["status"])) for a in gated) or "<li>none</li>"
+    gated_html = "".join("<li>%s. %s</li>" % (e(a["platform"]), e(a["status"])) for a in gated) or "<li>none</li>"
     cov_html = ("<h3>Coverage &amp; source truth</h3><ul>"
                 "<li>Direct platform data included: <b>%d</b></li>"
                 "<li>Open-web references included: <b>%d</b></li>"
@@ -493,7 +532,7 @@ def report_html(keyword=None, start=None, end=None):
             "body{font-family:'Lato',system-ui,Arial,sans-serif;color:#111;max-width:820px;margin:32px auto;padding:0 20px}"
             "h1,h3{font-family:'Noto Serif',Georgia,serif;font-weight:600}.kpi{display:inline-block;border:1px solid #ddd;border-radius:8px;padding:8px 14px;margin:4px 8px 4px 0}"
             ".kpi b{font-size:22px;display:block}td{padding:3px 12px;border-bottom:1px solid #eee}.muted{color:#777}ul{line-height:1.6}</style>"
-            "<h1>EGC Pulse — Internal Listening Report</h1><p class='muted'>Tracked term: <b>%s</b> · %s → %s · Generated %s</p>"
+            "<h1>EGC Pulse. Internal Listening Report</h1><p class='muted'>Tracked term: <b>%s</b> · %s → %s · Generated %s</p>"
             "<div><span class='kpi'><b>%s</b>mentions</span><span class='kpi'><b>%+d</b>net sentiment</span>"
             "<span class='kpi'><b>%d%%</b>positive</span><span class='kpi'><b>%d</b>sources</span></div>"
             "<h3>Sentiment</h3><p>Positive %d%% · Neutral %d%% · Negative %d%%</p>"
@@ -517,13 +556,13 @@ _jobs = {}
 _jobs_lock = threading.Lock()
 
 SKIP_MSG = {
-    "reddit": "Skipped Reddit — API key not configured.",
-    "x": "Skipped X — API key not configured.",
-    "meta": "Skipped Meta — connected account, Ad Library token, or approved research access required.",
-    "instagram": "Skipped Instagram — connected account or licensed provider required.",
-    "facebook": "Skipped Facebook — connected account, approved research access, or licensed provider required.",
-    "tiktok": "Skipped TikTok — research approval, connected account, commercial content access, or licensed provider required.",
-    "licensed": "Skipped Licensed provider — LICENSED_PROVIDER_API_KEY/URL not configured.",
+    "reddit": "Skipped Reddit. API key not configured.",
+    "x": "Skipped X. API key not configured.",
+    "meta": "Skipped Meta. Connected account, Ad Library token, or approved research access required.",
+    "instagram": "Skipped Instagram. Connected account or licensed provider required.",
+    "facebook": "Skipped Facebook. Connected account, approved research access, or licensed provider required.",
+    "tiktok": "Skipped TikTok. Research approval, connected account, commercial content access, or licensed provider required.",
+    "licensed": "Skipped Licensed provider. LICENSED_PROVIDER_API_KEY/URL not configured.",
 }
 
 
@@ -591,7 +630,7 @@ def run_job(jid):
             if j["_cancel"].is_set():
                 j["status"] = "cancelled"
                 return
-            j["current_source"] = "%s — %s" % (term, src.display_name)
+            j["current_source"] = "%s. %s" % (term, src.display_name)
             windows = pam.chunk_range(start, end, src.max_window_days)
             j["total_chunks"] = len(windows)
             got = []
@@ -624,7 +663,7 @@ def run_job(jid):
         j["finished_at"] = now_iso()
 
 
-# ── connection tests (never leak secret VALUES — only variable names) ────────
+# ── connection tests (never leak secret VALUES. Only variable names) ────────
 def test_connection(key):
     g = os.environ.get
     now = now_iso()
@@ -648,7 +687,7 @@ def test_connection(key):
                                          headers={"Authorization": "Basic " + auth, "User-Agent": g("REDDIT_USER_AGENT") or "egc-pulse/0.2",
                                                   "Content-Type": "application/x-www-form-urlencoded"})
             tok = json.loads(urllib.request.urlopen(req, timeout=10).read()).get("access_token")
-            return done(bool(tok), "Credentials valid — Reddit API reachable." if tok
+            return done(bool(tok), "Credentials valid. Reddit API reachable." if tok
                         else "Credentials found, but the platform rejected the request. Check app type, permissions, or API tier.")
         except Exception:
             return done(False, "Credentials found, but the platform rejected the request. Check app type, token validity, or API tier.")
@@ -659,10 +698,10 @@ def test_connection(key):
             req = urllib.request.Request("https://api.x.com/2/tweets/search/recent?query=egc%20-is%3Aretweet&max_results=10",
                                          headers={"Authorization": "Bearer " + g("X_BEARER_TOKEN")})
             urllib.request.urlopen(req, timeout=10)
-            return done(True, "Credentials valid — X API reachable.")
+            return done(True, "Credentials valid. X API reachable.")
         except urllib.error.HTTPError as e:
             if e.code == 429:
-                return done(True, "Credentials valid (rate-limited right now — HTTP 429).")
+                return done(True, "Credentials valid (rate-limited right now. HTTP 429).")
             return done(False, "Credentials found, but the platform rejected the request (HTTP %d). Check token validity or API tier." % e.code)
         except Exception:
             return done(False, "Could not reach the X API. Check the token and network.")
@@ -692,7 +731,20 @@ def test_connection(key):
         miss = [v for v in ("TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET") if not g(v)]
         if miss:
             return done(False, "Missing %s. Add them to demo/.env, restart the server, then test again." % " and ".join(miss), miss)
-        return done(False, "Credentials found. Live verification needs approved Research/Display/Commercial access — enable the matching access flag.")
+        return done(False, "Credentials found. Live verification needs approved Research/Display/Commercial access. Enable the matching access flag.")
+    if key == "open_web":
+        miss = [v for v in ("SEARCH_PROVIDER", "SEARCH_API_KEY") if not g(v)]
+        if miss:
+            return done(False, "Open web social discovery requires a search provider API key. Add %s (and SEARCH_API_ENDPOINT) to your environment, then test again."
+                        % " and ".join(miss), miss)
+        endpoint = g("SEARCH_API_ENDPOINT")
+        if not endpoint:
+            return done(True, "Search provider key found. Set SEARCH_API_ENDPOINT for your provider to complete setup.")
+        try:
+            urllib.request.urlopen(urllib.request.Request(endpoint, headers={"User-Agent": "egc-pulse/0.2"}), timeout=8)
+            return done(True, "Search provider endpoint reachable. Open web discovery is configured.")
+        except Exception:
+            return done(True, "Search provider key and endpoint found. The endpoint did not answer a bare request, which is normal for query-only APIs.")
     return done(False, "Unknown source.")
 
 
@@ -709,7 +761,7 @@ def app_mode():
 
 def public_config():
     """Safe, non-secret config the deployed frontend may read. NEVER contains
-    secret VALUES — only the API base URL (for split hosting), the app mode,
+    secret VALUES. Only the API base URL (for split hosting), the app mode,
     feature flags, and per-platform source statuses (already public elsewhere).
     The frontend defaults to same-origin relative paths; api_base is only set
     when PUBLIC_API_BASE_URL is configured (e.g. a separate static frontend)."""
@@ -719,6 +771,8 @@ def public_config():
         "internal_use": internal_use(),
         "ai_enabled": aip.enabled(),
         "sources": pam.platform_summary(),
+        "live_sources": [s.key for s in pam.get_live_collectors()],
+        "discovery": cd.discovery_status(),
     }
 
 
@@ -772,7 +826,7 @@ class Handler(BaseHTTPRequestHandler):
                                "app_mode": app_mode(),
                                "env_targets": {
                                    "local": "demo/.env (then restart the server)",
-                                   "production": "your host's environment variables — e.g. Render → Environment (then redeploy)"},
+                                   "production": "your host's environment variables. E.g. Render → Environment (then redeploy)"},
                                "deploy_note": ("Credentials are server-side environment variables and never touch the "
                                                "browser. Set them locally in demo/.env, or in production in your hosting "
                                                "provider's environment settings.")})
@@ -785,7 +839,9 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/coverage":
             return self._send(coverage_ledger(one("keyword"), st, en))
         if u.path == "/api/insights/account":
-            return self._send(pam.account_insights(st, en))
+            data = pam.account_insights(st, en)
+            data["manual"] = get_manual_insights()
+            return self._send(data)
         if u.path == "/api/mentions":
             return self._send(recent(int(one("limit") or 25), one("keyword"), one("platform"),
                                      one("sentiment"), st, en))
@@ -872,6 +928,33 @@ class Handler(BaseHTTPRequestHandler):
             if n:
                 add_keyword(term)
             return self._send({"imported": n, "term": term})
+        if u.path == "/api/enrich/urls":
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8", "ignore")) if length else {}
+            except Exception:
+                payload = {}
+            term = (payload.get("term") or one("q") or "url enrichment").strip()
+            res = cd.enrich_known_urls(payload.get("urls"), term)
+            recs = res.get("records", [])
+            ctx = {"source_key": "tiktok_oembed_known_url", "access_path": "official_api", "source_name": "TikTok oEmbed"}
+            for r in recs:
+                r["keyword"] = term
+                struth.normalize_mention_source(r, ctx)
+            stored = ingest(recs)
+            if stored:
+                add_keyword(term)
+            return self._send({"enriched": stored, "accepted": len(res.get("accepted", [])),
+                               "rejected": res.get("rejected", []), "term": term})
+        if u.path == "/api/insights/manual":
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                payload = json.loads(self.rfile.read(length).decode("utf-8", "ignore")) if length else {}
+            except Exception:
+                payload = {}
+            add_manual_insight(payload.get("platform"), payload.get("period"), payload.get("impressions"),
+                               payload.get("reach"), payload.get("engagement"), payload.get("note"))
+            return self._send({"ok": True, "manual": get_manual_insights()})
         return self._send({"error": "not found"}, 404)
 
 

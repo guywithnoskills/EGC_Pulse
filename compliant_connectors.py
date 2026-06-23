@@ -1,5 +1,5 @@
 """
-compliant-social-connectors — the platform-access governance module.
+compliant-social-connectors. The platform-access governance module.
 
 This module is the single place that decides HOW a source may be accessed. It
 encodes a hard rule: prefer official APIs → connected (owned) accounts →
@@ -213,7 +213,7 @@ def collect_facebook(term, start=None, end=None, limit=40):
 def collect_tiktok(term, start=None, end=None, limit=40):
     if env("LICENSED_PROVIDER_API_KEY"):
         return _licensed("tiktok", term, start, end, limit)
-    # Research API supports a max date window — caller should chunk_range() it.
+    # Research API supports a max date window. Caller should chunk_range() it.
     if env("TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET"):
         print("  [tiktok] Research API requires approval + chunked date windows; not auto-enabled")
     return []
@@ -222,7 +222,7 @@ def collect_tiktok(term, start=None, end=None, limit=40):
 def _licensed(platform, term, start, end, limit):
     """Adapter for a licensed data provider (e.g. a firehose reseller). Wired to
     LICENSED_PROVIDER_API_KEY + LICENSED_PROVIDER_URL. Returns [] until pointed
-    at a real provider — it does not invent data."""
+    at a real provider. It does not invent data."""
     base = os.environ.get("LICENSED_PROVIDER_URL")
     if not base:
         print("  [%s] LICENSED_PROVIDER_API_KEY set but LICENSED_PROVIDER_URL missing" % platform)
@@ -245,7 +245,7 @@ def _licensed(platform, term, start, end, limit):
 # ── OWNED-ACCOUNT ANALYTICS (impressions / reach / engagement) ────────────────
 # The ONLY compliant source of impressions & reach. These are private metrics
 # that ONLY the account owner can see, so this works for accounts that have
-# authorized THIS app via Meta Login — your own or your clients'. Never
+# authorized THIS app via Meta Login. Your own or your clients'. Never
 # third-party, never scraped. Returns a clear "not configured" payload until a
 # connected account + token are present; it never fabricates numbers.
 GRAPH = "https://graph.facebook.com/v21.0"
@@ -404,7 +404,7 @@ def collect_peertube(term, start=None, end=None, limit=20):
         ch = v.get("channel") or {}
         out.append({"platform": "peertube", "platform_post_id": str(v.get("uuid") or v.get("id")),
                     "author": ch.get("displayName") or ch.get("name"),
-                    "content": (v.get("name") or "") + ((" — " + v["description"]) if v.get("description") else ""),
+                    "content": (v.get("name") or "") + ((". " + v["description"]) if v.get("description") else ""),
                     "url": v.get("url"), "posted_at": v.get("publishedAt") or now_iso(),
                     "engagement": int(v.get("views") or 0)})
     return out
@@ -567,7 +567,7 @@ SOURCES = [
      "configured": lambda: env("LICENSED_PROVIDER_API_KEY", "LICENSED_PROVIDER_URL"),
      "base_status": RESEARCH, "live_status": LICENSED,
      "data_types": ["research: videos/comments/users (approved)", "owned account (Display)", "ads (Commercial Content)"],
-     "date_range_support": "chunked", "max_lookback": "Research API max date-window per call — chunk long ranges",
+     "date_range_support": "chunked", "max_lookback": "Research API max date-window per call. Chunk long ranges",
      "rate_limit": "Research API daily quotas", "permissions": "Research API approval (non-commercial) or licensed provider",
      "historical_modes": ["research_api", "connected_account_history", "licensed_archive"],
      "storage": "Inside approved environment; no public scraping", "display": True, "cache": True, "export": False, "resell": False,
@@ -633,7 +633,7 @@ def source_status(key):
 
 
 def matrix():
-    """Capability matrix for the UI / docs — no functions, JSON-safe."""
+    """Capability matrix for the UI / docs. No functions, JSON-safe."""
     drop = ("collector", "configured", "base_status", "live_status")
     out = []
     for s in SOURCES:
