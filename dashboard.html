@@ -120,6 +120,13 @@
   .badge .bd{width:6px;height:6px;border-radius:50%;flex:none}
   .badge.live{background:#16271f;color:var(--pos);border:1px solid #2f5e47} .badge.live .bd{background:var(--pos)}
   .badge.soon{background:var(--panel);color:var(--muted);border:1px solid var(--line2)} .badge.soon .bd{background:var(--g3)}
+  .badge.ow{background:var(--brand-tint);color:var(--brand2);border:1px solid var(--brand-line)} .badge.ow .bd{background:var(--brand2)}
+  .ttmodal{position:fixed;top:50%;left:50%;transform:translate(-50%,-48%);background:var(--panel);border:1px solid var(--line2);border-radius:14px;z-index:60;width:520px;max-width:94vw;padding:22px;display:none;box-shadow:var(--shadow)}
+  .ttmodal.open{display:block}
+  .ttmodal h2{font-family:var(--serif);font-size:18px;font-weight:700;margin:0 0 4px}
+  .ttmodal textarea{width:100%;height:118px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;border:1px solid var(--line2);border-radius:8px;padding:10px;resize:vertical;outline:none;background:var(--surface);color:var(--ink);margin-top:6px}
+  .ttmodal textarea:focus{border-color:var(--ink2)}
+  .ttmodal .row{display:flex;gap:8px;align-items:center;margin-top:12px} .ttmodal .msg{font-size:12px;color:var(--muted)}
   .src.is-soon{opacity:.96}
   .src.is-soon .ic{filter:grayscale(1)}
   .src .row2{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px}
@@ -430,6 +437,15 @@
 
 <!-- Accounts & access removed per product direction. Credentials remain server-side env vars; coming-soon sources are shown on the Sources view. -->
 
+<!-- TikTok known-URL enrichment modal -->
+<div class="scrim" id="ttScrim"></div>
+<div class="ttmodal" id="ttModal">
+  <div class="dh"><h2>Add TikTok URLs</h2><span class="closeX" id="ttClose">Close</span></div>
+  <div class="lead">Paste public TikTok <b>video</b> URLs (one per line). Pulse enriches each via TikTok's official oEmbed endpoint (title, author, hashtags). This is not a TikTok search and never crawls profiles or hashtags. TikTok LIVE is not available compliantly.</div>
+  <textarea id="ttUrls" placeholder="https://www.tiktok.com/@user/video/123..."></textarea>
+  <div class="row"><button class="btn" id="ttDo">Enrich URLs</button><button class="btn quiet" id="ttCancel">Cancel</button><span class="msg" id="ttMsg"></span></div>
+</div>
+
 <script>
 /* ---------------- helpers ---------------- */
 const $=id=>document.getElementById(id);
@@ -447,7 +463,7 @@ const PLAT_NAMES={open_web:'Open web discovery',youtube:'YouTube',bluesky:'Blues
 const PLAT_ORDER=['youtube','bluesky','open_web','reddit','x','meta','instagram','facebook','tiktok','licensed'];
 const PLAT_DISP=PLAT_NAMES;
 const SRC_ICON={open_web:'OW',youtube:'YT',bluesky:'BS',reddit:'RD',x:'X',meta:'MT',instagram:'IG',facebook:'FB',tiktok:'TT',licensed:'LP'};
-const SRC_PATH={open_web:'Google Custom Search',youtube:'YouTube Data API v3',bluesky:'AT Protocol public API',reddit:'Official Data API',x:'API v2',meta:'Graph API',instagram:'Graph API',facebook:'Graph API',tiktok:'Research API',licensed:'Licensed feed'};
+const SRC_PATH={open_web:'Brave Search API',youtube:'YouTube Data API v3',bluesky:'AT Protocol public API',reddit:'Official Data API',x:'API v2',meta:'Graph API',instagram:'Graph API',facebook:'Graph API',tiktok:'Research API',licensed:'Licensed feed'};
 const SRC_DESC={open_web:'Public web pages referencing the brand, via official search API.',youtube:'Public video search with views (reach) and likes plus comments (engagement).',bluesky:'Public posts from the open AT Protocol network. Keyless.',reddit:'Public posts from the official Reddit Data API.',x:'Public posts via the official X API v2.',meta:'Owned-account analytics and approved research access.',instagram:'Owned-account analytics via connected accounts.',facebook:'Owned-account analytics via connected Pages.',tiktok:'Approved research or connected-account access.',licensed:'Public listening on closed platforms via a licensed reseller.'};
 const COV_BADGE={direct_official_api:'Direct API',direct_connected_account:'Connected account',direct_research_api:'Research API',direct_transparency_api:'Ads only',direct_licensed_provider:'Licensed feed',open_web_reference:'Open-web reference',open_network_public:'Open network',historical_open_web:'Historical open web',limited_metadata:'Limited metadata',unavailable_compliantly:'Unavailable',known_url_enrichment:'oEmbed (known URL)'};
 
@@ -513,13 +529,25 @@ function sourceCard(p){
     '<div style="min-width:0;flex:1"><div class="nm">'+esc(nm)+'</div><div class="path">'+esc(SRC_PATH[k]||'')+'</div></div>'+stat+'</div>'+
     '<div class="desc">'+esc(SRC_DESC[k]||'')+'</div>'+metric+'</div>';
 }
+function tiktokCard(p){
+  const cnt=lastMetrics&&(lastMetrics.platforms||[]).find(x=>String(x.platform).toLowerCase()==='tiktok');
+  return '<div class="card src"><div class="top"><div class="ic">'+esc(SRC_ICON.tiktok)+'</div>'+
+    '<div style="min-width:0;flex:1"><div class="nm">TikTok</div><div class="path">Open web + known-URL oEmbed</div></div>'+
+    '<span class="badge ow"><span class="bd"></span>Open web</span></div>'+
+    '<div class="desc">Surfaced via open-web discovery and enriched from known TikTok video URLs (official oEmbed). Not native keyword listening; TikTok LIVE is not available compliantly.</div>'+
+    '<div class="row2"><span class="metric"><b>'+(cnt?fmt(cnt.value):'0')+'</b> mentions in range</span>'+
+    '<button class="btn ghost" id="ttEnrichBtn" style="height:30px;font-size:12px;padding:0 11px">Add TikTok URLs</button></div></div>';
+}
 function renderSources(platforms){
   platformsCache=platforms||[];
   const byp={};platforms.forEach(p=>byp[p.platform]=p);
   const live=PLAT_ORDER.filter(k=>byp[k]&&byp[k].live);
-  const soon=PLAT_ORDER.filter(k=>byp[k]&&!byp[k].live);
-  $('liveSources').innerHTML=live.map(k=>sourceCard(byp[k])).join('')||'<div class="empty" style="grid-column:1/-1">No live sources configured yet.</div>';
+  const soon=PLAT_ORDER.filter(k=>byp[k]&&!byp[k].live&&k!=='tiktok');
+  const liveCards=live.map(k=>sourceCard(byp[k]));
+  liveCards.push(tiktokCard(byp['tiktok']||{platform:'tiktok'}));   // TikTok via open web + oEmbed (honestly labeled)
+  $('liveSources').innerHTML=liveCards.join('')||'<div class="empty" style="grid-column:1/-1">No live sources configured yet.</div>';
   $('comingSoon').innerHTML=soon.map(k=>sourceCard(byp[k])).join('');
+  const tb=$('ttEnrichBtn');if(tb)tb.onclick=openTT;
   const disc=(cfgCache&&cfgCache.discovery)||{};
   const provTxt=disc.provider?(disc.provider+(disc.can_collect?' ready':' requires key')):'';
   $('liveSub').textContent=live.length+' live source'+(live.length===1?'':'s')+(provTxt?(' · discovery: '+provTxt):'');
@@ -886,6 +914,22 @@ async function openCoverage(){
 function closeCoverage(){$('covScrim').classList.remove('open');$('covDrawer').classList.remove('open');lock(false);}
 $('closeCov').onclick=closeCoverage;$('covScrim').onclick=closeCoverage;$('covOpen').onclick=openCoverage;
 
+/* TikTok known-URL enrichment */
+function openTT(){$('ttScrim').classList.add('open');$('ttModal').classList.add('open');lock(true);$('ttMsg').textContent='';}
+function closeTT(){$('ttScrim').classList.remove('open');$('ttModal').classList.remove('open');lock(false);}
+$('ttClose').onclick=closeTT;$('ttCancel').onclick=closeTT;$('ttScrim').onclick=closeTT;
+$('ttDo').onclick=async()=>{
+  const urls=$('ttUrls').value.trim();const term=state.term||'tiktok urls';
+  if(!urls){$('ttMsg').textContent='Paste one or more TikTok video URLs.';return;}
+  $('ttDo').disabled=true;$('ttMsg').textContent='Enriching';
+  try{const r=await (await api('/api/enrich/urls',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls,term})})).json();
+    const rej=(r.rejected&&r.rejected.length)?(' '+r.rejected.length+' rejected (not TikTok video URLs).'):'';
+    $('ttMsg').textContent='Enriched '+(r.enriched||0)+' URL'+((r.enriched||0)===1?'':'s')+'.'+rej;
+    if(!state.term)state.term=term;$('ttUrls').value='';
+  }catch(e){$('ttMsg').textContent='Enrich failed.';}
+  $('ttDo').disabled=false;setTimeout(closeTT,1300);refresh();
+};
+
 $('aiBtn').onclick=async()=>{
   $('aiBtn').disabled=true;$('aiOut').textContent='Generating internal insight';
   try{const r=await (await api('/api/ai/insights',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tracked_terms:state.term?[state.term]:[],platforms:[],start_date:state.start,end_date:state.end})})).json();
@@ -895,7 +939,7 @@ $('aiBtn').onclick=async()=>{
   $('aiBtn').disabled=false;
 };
 
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeCoverage();closeExportMenu();closeDatePanel();}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeCoverage();closeExportMenu();closeDatePanel();closeTT();}});
 
 /* ---------------- init ---------------- */
 loadState();syncInputs();validate();updateDateLabel();setView(state.view);

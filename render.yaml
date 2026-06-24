@@ -17,16 +17,14 @@ services:
         value: "true"
       - key: AI_INSIGHTS_ENABLED
         value: "false"
-      # Open web social discovery (primary listening source). Provider name is not
-      # a secret; the API key is. SEARCH_CSE_ID is your Programmable Search Engine id.
+      # Open web social discovery (primary listening source) via the Brave Search
+      # API. Provider name is not a secret; the API key is (sync: false).
       - key: SEARCH_PROVIDER
-        value: "google_cse"
+        value: "brave"
       - key: SEARCH_API_KEY
         sync: false
-      - key: SEARCH_CSE_ID
-        sync: false
-      # YouTube Data API v3 (live source). Free Google Cloud API key; enable
-      # "YouTube Data API v3" on the key's project. Keyless sources run without it.
+      # YouTube Data API v3 (live source). Free Google API key with YouTube Data
+      # API v3 enabled. Keyless sources (Bluesky) run without any of these.
       - key: YOUTUBE_API_KEY
         sync: false
       # Secrets — Render prompts for these; never stored in the repo. Leave blank

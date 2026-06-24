@@ -131,20 +131,22 @@ def build_open_web_queries(term, hashtags=None, platforms=None):
     if not term:
         return []
     tag = _norm_hashtag(term)
-    # Lean query set to conserve the search provider's daily quota (Google CSE
-    # free tier = 100 queries/day). The plain brand query is the highest-signal
-    # one; the three domain queries surface social-link references. Override the
-    # cap with SEARCH_MAX_QUERIES if you have a paid/raised quota.
+    # Lean query set to conserve the search provider's quota (Brave free credit
+    # ~= 1,000 queries/month). One broad brand query plus site:-scoped queries that
+    # surface TikTok / Instagram / Facebook content for the term DIRECTLY (the
+    # search provider returns the platform's own public URLs, which we then enrich
+    # via oEmbed for TikTok videos). TikTok is queried first so it is included even
+    # if SEARCH_MAX_QUERIES is lowered. Override the cap for a raised/paid quota.
     base = [
-        '"%s"' % term,                       # plain brand mention across the open web
-        '"%s" "instagram.com"' % term,
-        '"%s" "tiktok.com"' % term,
-        '"%s" "facebook.com"' % term,
+        'site:tiktok.com "%s"' % term,       # TikTok videos + profiles for the term
+        '"%s"' % term,                       # broad open-web brand mentions (news, blogs, forums)
+        'site:instagram.com "%s"' % term,    # Instagram content for the term
+        'site:facebook.com "%s"' % term,     # Facebook content for the term
     ]
     q = [x for x in base if x]
-    for h in (hashtags or [])[:2]:
+    for h in (hashtags or [])[:1]:
         ht = h if str(h).startswith("#") else "#" + str(h)
-        q.append('"%s" "instagram.com"' % ht)
+        q.append('site:tiktok.com "%s"' % ht)
     seen, out = set(), []
     for it in q:
         if it not in seen:
@@ -162,8 +164,6 @@ def search_provider_configured():
     if not os.getenv("SEARCH_API_KEY"):
         return False
     provider = (os.getenv("SEARCH_PROVIDER") or "").strip().lower()
-    if provider == "google_cse" and not os.getenv("SEARCH_CSE_ID"):
-        return False  # Google CSE also requires the Programmable Search Engine ID (cx)
     return bool(provider or os.getenv("SEARCH_API_ENDPOINT"))
 
 
@@ -175,7 +175,7 @@ def search_provider_status():
                        "Set SEARCH_PROVIDER, SEARCH_API_KEY, and SEARCH_API_ENDPOINT."}
 
 
-_PROVIDER_NAMES = {"brave": "Brave", "bing": "Bing", "google_cse": "Google CSE", "serpapi": "SerpAPI", "custom": "Custom"}
+_PROVIDER_NAMES = {"brave": "Brave", "bing": "Bing", "custom": "Custom"}
 
 
 def discovery_status():
@@ -184,20 +184,13 @@ def discovery_status():
     never read into the response."""
     provider = (os.getenv("SEARCH_PROVIDER") or "").strip().lower()
     key = bool(os.getenv("SEARCH_API_KEY"))
-    cse = bool(os.getenv("SEARCH_CSE_ID"))
     can = search_provider_configured()
-    msg = None
-    if not can:
-        if provider == "google_cse" and key and not cse:
-            msg = "Google CSE also needs SEARCH_CSE_ID (your Programmable Search Engine ID)."
-        else:
-            msg = "Open web social discovery requires a server-side search provider key."
+    msg = None if can else "Open web social discovery requires a server-side search provider key."
     return {
         "provider": _PROVIDER_NAMES.get(provider, provider.title()) if provider else None,
         "provider_configured": bool(provider),
         "key_configured": key,
         "endpoint_configured": bool(os.getenv("SEARCH_API_ENDPOINT")),
-        "cse_id_configured": cse,
         "can_collect": can,
         "message": msg,
         "last_error": _LAST_SEARCH_ERROR or None,
@@ -218,8 +211,6 @@ def _freshness(provider, start, end):
         return "%sto%s" % (start, end)                 # Brave supports a custom date range
     if provider == "bing":
         return "Day" if days <= 1 else ("Week" if days <= 7 else "Month")
-    if provider == "google_cse":
-        return "d1" if days <= 1 else ("w1" if days <= 7 else ("m1" if days <= 31 else "y1"))
     return None
 
 
@@ -259,7 +250,7 @@ def search_provider_query(query, count=8, start=None, end=None):
     [{title,url,snippet}]. Returns [] when no provider is configured. It never
     scrapes search-engine result HTML. Callers must respect the provider's terms
     and robots policy. SEARCH_API_KEY is read server-side only and is never logged.
-    Provider order of preference: brave, bing, google_cse, serpapi, custom."""
+    Provider order of preference: brave (primary), bing, custom."""
     provider = (os.getenv("SEARCH_PROVIDER") or "").lower()
     key = os.getenv("SEARCH_API_KEY")
     endpoint = os.getenv("SEARCH_API_ENDPOINT")
@@ -279,16 +270,6 @@ def search_provider_query(query, count=8, start=None, end=None):
         params = {"q": query, "count": min(count, 50), "responseFilter": "Webpages"}
         if fresh:
             params["freshness"] = fresh
-    elif provider == "google_cse":
-        endpoint = endpoint or "https://www.googleapis.com/customsearch/v1"
-        params = {"q": query, "num": min(count, 10), "key": key}
-        if os.getenv("SEARCH_CSE_ID"):
-            params["cx"] = os.getenv("SEARCH_CSE_ID")
-        if fresh:
-            params["dateRestrict"] = fresh
-    elif provider == "serpapi":
-        endpoint = endpoint or "https://serpapi.com/search.json"
-        params = {"q": query, "num": min(count, 20), "engine": "google", "api_key": key}
     else:  # custom / generic JSON endpoint with bearer auth
         if not endpoint:
             return []
@@ -299,15 +280,15 @@ def search_provider_query(query, count=8, start=None, end=None):
         req = urllib.request.Request(url, headers=headers)
         data = json.loads(urllib.request.urlopen(req, timeout=12).read().decode("utf-8", "ignore"))
     except Exception as e:
-        # Some providers (google_cse, serpapi) carry the key in the query string, so
-        # scrub it from any exception text before logging. The key is never logged as a value.
+        # The key is read server-side only; scrub it from any exception text before
+        # logging so it is never recorded as a value.
         global _LAST_SEARCH_ERROR
         msg = str(e)
         if key:
             msg = msg.replace(key, "***")
-        if provider == "google_cse" and ("429" in msg or "quota" in msg.lower() or "RESOURCE_EXHAUSTED" in msg):
-            _LAST_SEARCH_ERROR = ("Google Custom Search daily quota reached (free tier = 100 queries/day). "
-                                  "Enable billing on the Google Cloud project for up to 10,000/day, or wait for the daily reset.")
+        if "429" in msg or "quota" in msg.lower() or "limit" in msg.lower():
+            _LAST_SEARCH_ERROR = ("Brave Search monthly quota/credit reached. Raise the spending limit in the Brave "
+                                  "API dashboard, or wait for the monthly reset.")
         else:
             _LAST_SEARCH_ERROR = "%s search error: %s" % (provider or "custom", msg[:100])
         print("  [open_web_discovery] %s" % _LAST_SEARCH_ERROR[:160])
@@ -411,7 +392,12 @@ def collect_open_web_discovery(term, start=None, end=None, limit=24, hashtags=No
     per = max(3, limit // max(len(queries), 1))
     seen, out = set(), []
     for q in queries:
-        for r in search_provider_query(q, count=per, start=start, end=end):
+        # No recency/date restriction on discovery: we want the brand's evergreen
+        # social footprint. TikTok / Instagram / Facebook pages are rarely
+        # date-stamped, so a search-provider freshness filter drops them entirely.
+        # Results are stored with the collection date and filtered by range at
+        # display time, so date scoping still applies to what the user sees.
+        for r in search_provider_query(q, count=per):
             url = r.get("url") or ""
             if not url or url in seen:
                 continue

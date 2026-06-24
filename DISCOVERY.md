@@ -62,10 +62,9 @@ existing open web connector." No data is faked.
 
 Environment variables (server-side only, never in the browser):
 ```
-SEARCH_PROVIDER=        # brave | bing | serpapi | google_cse | custom
-SEARCH_API_KEY=
-SEARCH_API_ENDPOINT=    # optional; defaults provided for known providers
-SEARCH_CSE_ID=          # only for google_cse
+SEARCH_PROVIDER=        # brave (primary, recommended) | bing | custom
+SEARCH_API_KEY=         # Brave Search API key (api-dashboard.search.brave.com)
+SEARCH_API_ENDPOINT=    # optional; default provided for brave/bing
 ```
 
 ### 4. Manual import

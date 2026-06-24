@@ -694,7 +694,12 @@ def run_job(jid):
                     rate = rate or ("429" in msg or "rate" in msg.lower())
                     j["errors"].append({"source": src.key, "error": msg[:140]})
             got = pam.dedupe(got)
-            rel = [r for r in got if is_relevant((r.get("content") or "") + " " + (r.get("author") or ""), [term])]
+            # Open-web discovery results are already term-scoped by the search provider
+            # (e.g. site:tiktok.com "term"), so trust them; only re-filter API sources
+            # (YouTube/Bluesky/etc.) whose results can be loosely related. The URL is
+            # included in the relevance text so term-in-handle/path matches count.
+            rel = [r for r in got if (r.get("platform") == "open_web"
+                   or is_relevant((r.get("content") or "") + " " + (r.get("author") or "") + " " + (r.get("url") or ""), [term]))]
             ctx = {"source_key": src.key, "access_path": src.access_path.value, "run_id": jid, "source_name": src.display_name}
             for r in rel:
                 r["keyword"] = term
