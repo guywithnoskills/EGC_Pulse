@@ -131,27 +131,30 @@ def build_open_web_queries(term, hashtags=None, platforms=None):
     if not term:
         return []
     tag = _norm_hashtag(term)
+    # Lean query set to conserve the search provider's daily quota (Google CSE
+    # free tier = 100 queries/day). The plain brand query is the highest-signal
+    # one; the three domain queries surface social-link references. Override the
+    # cap with SEARCH_MAX_QUERIES if you have a paid/raised quota.
     base = [
-        '"%s" "tiktok.com"' % term,
-        ('"#%s" "tiktok.com"' % tag) if tag else None,
+        '"%s"' % term,                       # plain brand mention across the open web
         '"%s" "instagram.com"' % term,
-        ('"#%s" "instagram.com"' % tag) if tag else None,
+        '"%s" "tiktok.com"' % term,
         '"%s" "facebook.com"' % term,
-        '"%s" "TikTok"' % term,
-        '"%s" "Instagram"' % term,
-        '"%s" "Facebook"' % term,
     ]
     q = [x for x in base if x]
-    for h in (hashtags or [])[:5]:
+    for h in (hashtags or [])[:2]:
         ht = h if str(h).startswith("#") else "#" + str(h)
-        q.append('"%s" "tiktok.com"' % ht)
         q.append('"%s" "instagram.com"' % ht)
     seen, out = set(), []
     for it in q:
         if it not in seen:
             seen.add(it)
             out.append(it)
-    return out[:14]
+    try:
+        cap = int(os.getenv("SEARCH_MAX_QUERIES") or 4)
+    except ValueError:
+        cap = 4
+    return out[:max(1, cap)]
 
 
 # ── open web search provider adapter (GATED; official APIs only) ─────────────
@@ -197,6 +200,7 @@ def discovery_status():
         "cse_id_configured": cse,
         "can_collect": can,
         "message": msg,
+        "last_error": _LAST_SEARCH_ERROR or None,
     }
 
 
@@ -247,6 +251,9 @@ def _parse_search_results(data):
     return out
 
 
+_LAST_SEARCH_ERROR = ""  # last provider error (e.g. quota), surfaced to the UI/sweep
+
+
 def search_provider_query(query, count=8, start=None, end=None):
     """Query a CONFIGURED, official open-web search provider JSON API and return
     [{title,url,snippet}]. Returns [] when no provider is configured. It never
@@ -294,10 +301,16 @@ def search_provider_query(query, count=8, start=None, end=None):
     except Exception as e:
         # Some providers (google_cse, serpapi) carry the key in the query string, so
         # scrub it from any exception text before logging. The key is never logged as a value.
+        global _LAST_SEARCH_ERROR
         msg = str(e)
         if key:
             msg = msg.replace(key, "***")
-        print("  [open_web_discovery] %s search error: %s" % (provider or "custom", msg[:120]))
+        if provider == "google_cse" and ("429" in msg or "quota" in msg.lower() or "RESOURCE_EXHAUSTED" in msg):
+            _LAST_SEARCH_ERROR = ("Google Custom Search daily quota reached (free tier = 100 queries/day). "
+                                  "Enable billing on the Google Cloud project for up to 10,000/day, or wait for the daily reset.")
+        else:
+            _LAST_SEARCH_ERROR = "%s search error: %s" % (provider or "custom", msg[:100])
+        print("  [open_web_discovery] %s" % _LAST_SEARCH_ERROR[:160])
         return []
     return _parse_search_results(data)
 
@@ -388,11 +401,13 @@ def collect_open_web_discovery(term, start=None, end=None, limit=24, hashtags=No
     """Run controlled open-web discovery queries via the configured search
     provider. Enriches discovered TikTok video URLs via official oEmbed. Returns
     [] when no search provider is configured (the source stays gated)."""
+    global _LAST_SEARCH_ERROR
     if not search_provider_configured():
         return []
     queries = build_open_web_queries(term, hashtags)
     if not queries:
         return []
+    _LAST_SEARCH_ERROR = ""
     per = max(3, limit // max(len(queries), 1))
     seen, out = set(), []
     for q in queries:
@@ -414,4 +429,6 @@ def collect_open_web_discovery(term, start=None, end=None, limit=24, hashtags=No
             out.append(rec)
             if len(out) >= limit:
                 return out
+    if not out and _LAST_SEARCH_ERROR:
+        raise RuntimeError(_LAST_SEARCH_ERROR)
     return out

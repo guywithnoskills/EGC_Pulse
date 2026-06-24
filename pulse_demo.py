@@ -17,6 +17,7 @@ import hashlib
 import io
 import csv
 import json
+import math
 import os
 import re
 import sys
@@ -200,7 +201,7 @@ def init_db():
               platform_post_id TEXT NOT NULL, keyword TEXT, author TEXT, content TEXT,
               content_hash TEXT NOT NULL, url TEXT, lang TEXT DEFAULT 'en',
               posted_at TEXT NOT NULL, posted_date TEXT, ingested_at TEXT NOT NULL,
-              engagement INTEGER DEFAULT 0, sentiment TEXT, sentiment_score REAL,
+              engagement INTEGER DEFAULT 0, reach INTEGER DEFAULT 0, sentiment TEXT, sentiment_score REAL,
               is_hidden INTEGER DEFAULT 0, UNIQUE(platform, platform_post_id, keyword))""")
         c.execute("CREATE TABLE IF NOT EXISTS suppression (platform TEXT, id_hash TEXT, PRIMARY KEY (platform, id_hash))")
         # Owner-entered account analytics (impressions/reach typed from the user's
@@ -213,6 +214,8 @@ def init_db():
         if "posted_date" not in cols:  # migrate older DBs
             c.execute("ALTER TABLE mentions ADD COLUMN posted_date TEXT")
             c.execute("UPDATE mentions SET posted_date = substr(posted_at,1,10) WHERE posted_date IS NULL")
+        if "reach" not in cols:  # engagement (interactions) vs reach (views/visibility) split for analytics
+            c.execute("ALTER TABLE mentions ADD COLUMN reach INTEGER DEFAULT 0")
         # source-truth / coverage-ledger columns (safe additive migration)
         truth_cols = {"display_platform": "TEXT", "source_platform": "TEXT", "searched_platform": "TEXT",
                       "discussed_platforms": "TEXT", "direct_platform_data": "INTEGER",
@@ -288,13 +291,13 @@ def ingest(records):
             try:
                 cur = c.execute(
                     "INSERT OR IGNORE INTO mentions (platform, platform_post_id, keyword, author, content, "
-                    "content_hash, url, lang, posted_at, posted_date, ingested_at, engagement, sentiment, sentiment_score, "
+                    "content_hash, url, lang, posted_at, posted_date, ingested_at, engagement, reach, sentiment, sentiment_score, "
                     "display_platform, source_platform, searched_platform, discussed_platforms, direct_platform_data, "
                     "platform_coverage_type, coverage_label, coverage_note, access_path, source_key, confidence_level, run_id) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (r["platform"], str(r["platform_post_id"]), r.get("keyword"), r.get("author"),
                      r.get("content"), ch, r.get("url"), r.get("lang", "en"), posted, posted[:10],
-                     now, int(r.get("engagement", 0)), label, score,
+                     now, int(r.get("engagement", 0)), int(r.get("reach", 0)), label, score,
                      r.get("display_platform"), r.get("source_platform"), r.get("searched_platform"),
                      r.get("discussed_platforms") or "[]", int(r.get("direct_platform_data") or 0),
                      r.get("platform_coverage_type"), r.get("coverage_label"), r.get("coverage_note"),
@@ -409,6 +412,28 @@ STOPWORDS = set("the a an and or for to of in on at is are was be it this that w
                 "co will like dont been they that this with said were would people".split())
 
 
+# ── Analytics model (documented in ANALYTICS.md) ──────────────────────────────
+# Impressions = measured views/displays we actually receive from a platform API
+#   (YouTube viewCount; owned-account impressions when a Meta account is connected).
+# Reach (estimated) = estimated unique audience = impressions * REACH_FACTOR. Public
+#   listening APIs do not expose unique reach, so this is a clearly-labeled estimate.
+REACH_FACTOR = 0.75
+
+
+def visibility_score(mentions, impressions, engagement, net_sentiment):
+    """Cumulative 0-100 brand-visibility index. Log-scaled so each lever has
+    diminishing returns; weighted volume 30 / amplification 30 / engagement 25 /
+    sentiment 15. Fully documented in ANALYTICS.md."""
+    if not mentions:
+        return 0
+    lg = lambda v: math.log10((v or 0) + 1)
+    vol = min(lg(mentions) / 3.0, 1.0)       # ~1,000 mentions -> full marks
+    amp = min(lg(impressions) / 6.0, 1.0)    # ~1,000,000 impressions -> full marks
+    eng = min(lg(engagement) / 5.0, 1.0)     # ~100,000 interactions -> full marks
+    sent = (max(-100, min(100, net_sentiment or 0)) + 100) / 200.0
+    return int(round(100 * (0.30 * vol + 0.30 * amp + 0.25 * eng + 0.15 * sent)))
+
+
 def metrics(keyword=None, start=None, end=None):
     where, wp = _filters(keyword, start, end)
     kwhere, kwp = _filters(None, start, end)
@@ -426,6 +451,11 @@ def metrics(keyword=None, start=None, end=None):
                             + " AND keyword IS NOT NULL GROUP BY keyword ORDER BY n DESC", kwp).fetchall()
         cov_rows = c.execute("SELECT display_platform, platform_coverage_type, direct_platform_data, "
                              "discussed_platforms FROM mentions WHERE " + where + " LIMIT 2000", wp).fetchall()
+        agg = c.execute("SELECT COALESCE(SUM(engagement),0) e, COALESCE(SUM(reach),0) r FROM mentions WHERE " + where, wp).fetchone()
+        plat_eng = c.execute("SELECT COALESCE(display_platform, platform) p, COALESCE(SUM(engagement),0) e, "
+                             "COALESCE(SUM(reach),0) r FROM mentions WHERE " + where + " GROUP BY p ORDER BY r DESC, e DESC", wp).fetchall()
+        top = c.execute("SELECT content, url, COALESCE(display_platform, platform) p, engagement, reach, sentiment, author "
+                        "FROM mentions WHERE " + where + " ORDER BY reach DESC, engagement DESC LIMIT 5", wp).fetchall()
     sc = {r["s"]: r["n"] for r in sent}
     pos, neg, neu = sc.get("positive", 0), sc.get("negative", 0), sc.get("neutral", 0)
     denom = max(pos + neg + neu, 1)
@@ -436,8 +466,18 @@ def metrics(keyword=None, start=None, end=None):
             if len(tok) > 3 and tok not in STOPWORDS and tok != kwlow:
                 freq[tok] = freq.get(tok, 0) + 1
     topics = sorted(freq.items(), key=lambda kv: kv[1], reverse=True)[:8]
-    return {"kpis": {"totalMentions": total, "netSentiment": round(100 * (pos - neg) / denom),
-                     "platforms": len(plats), "positivePct": round(100 * pos / denom)},
+    impressions = agg["r"]                                    # measured views/displays
+    est_reach = int(round(impressions * REACH_FACTOR))        # estimated unique audience
+    net = round(100 * (pos - neg) / denom)
+    return {"kpis": {"totalMentions": total, "netSentiment": net,
+                     "platforms": len(plats), "positivePct": round(100 * pos / denom),
+                     "totalEngagement": agg["e"], "totalImpressions": impressions,
+                     "totalReach": est_reach,
+                     "visibilityScore": visibility_score(total, impressions, agg["e"], net)},
+            "engagementByPlatform": [{"platform": r["p"], "engagement": r["e"], "reach": r["r"]} for r in plat_eng],
+            "topContent": [{"content": (r["content"] or "").replace("\n", " ")[:160], "url": r["url"],
+                            "platform": r["p"], "engagement": r["engagement"], "reach": r["reach"],
+                            "sentiment": r["sentiment"], "author": r["author"]} for r in top],
             "volume": [{"t": r["d"], "value": r["n"]} for r in vol],
             "sentiment": {"positive": pos, "neutral": neu, "negative": neg},
             "platforms": [{"platform": r["p"], "value": r["n"]} for r in plats],
@@ -457,7 +497,7 @@ def recent(limit=25, keyword=None, platform=None, sentiment=None, start=None, en
     args.append(limit)
     with db() as c:
         return [dict(r) for r in c.execute(
-            "SELECT platform, keyword, author, content, url, posted_at, sentiment, engagement, "
+            "SELECT platform, keyword, author, content, url, posted_at, sentiment, engagement, reach, "
             "display_platform, source_platform, searched_platform, discussed_platforms, direct_platform_data, "
             "platform_coverage_type, coverage_label, coverage_note, source_key, confidence_level "
             "FROM mentions WHERE " + where + " ORDER BY posted_at DESC LIMIT ?", args).fetchall()]
@@ -557,6 +597,7 @@ _jobs_lock = threading.Lock()
 
 SKIP_MSG = {
     "reddit": "Skipped Reddit. API key not configured.",
+    "youtube": "Skipped YouTube. API key not configured.",
     "x": "Skipped X. API key not configured.",
     "meta": "Skipped Meta. Connected account, Ad Library token, or approved research access required.",
     "instagram": "Skipped Instagram. Connected account or licensed provider required.",
@@ -603,8 +644,8 @@ def start_job(terms, start, end, mode):
     jid = uuid.uuid4().hex[:12]
     j = {"job_id": jid, "status": "queued", "progress_pct": 0, "current_source": None,
          "current_chunk": 0, "total_chunks": 0, "stored_count": 0, "skipped_sources": [],
-         "errors": [], "coverage": [], "terms": terms, "start": start, "end": end, "mode": mode,
-         "started_at": now_iso(), "_cancel": threading.Event()}
+         "errors": [], "coverage": [], "message": "", "terms": terms, "start": start, "end": end,
+         "mode": mode, "started_at": now_iso(), "_cancel": threading.Event()}
     with _jobs_lock:
         _jobs[jid] = j
     threading.Thread(target=run_job, args=(jid,), daemon=True).start()
@@ -622,6 +663,13 @@ def run_job(jid):
         end = j["end"]
         live = pam.get_live_collectors()
         j["skipped_sources"] = _skipped_sources()
+        if not live:
+            j["status"] = "no_sources"
+            j["message"] = ("No data sources are configured, so there is nothing to search. "
+                            "Add credentials for a source (Reddit is the quickest) in demo/.env "
+                            "locally, or in your host's environment (Render → Environment) for "
+                            "the deploy, then run again.")
+            return
         units = [(t, s) for t in j["terms"] for s in live]
         total = len(units) or 1
         done = 0
@@ -656,6 +704,9 @@ def run_job(jid):
             done += 1
             j["progress_pct"] = round(100 * done / total)
         j["status"] = "rate_limited" if (rate and j["stored_count"] == 0) else "complete"
+        if j["status"] == "complete" and j["stored_count"] == 0 and not j["errors"]:
+            j["message"] = ("Searched %d source(s) but found no matching mentions in this range. "
+                            "Try a broader term or a wider date range." % len(live))
     except Exception as e:
         j["status"] = "failed"
         j["errors"].append({"source": "job", "error": str(e)[:140]})
@@ -679,18 +730,42 @@ def test_connection(key):
     if key == "reddit":
         miss = [v for v in ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET") if not g(v)]
         if miss:
-            return done(False, "Missing %s. Add them to demo/.env, restart the server, then test again." % " and ".join(miss), miss)
+            return done(False, "Missing %s. Add them to demo/.env (local) or your host's environment (Render), then test again." % " and ".join(miss), miss)
         try:
             import base64
             auth = base64.b64encode(("%s:%s" % (g("REDDIT_CLIENT_ID"), g("REDDIT_CLIENT_SECRET"))).encode()).decode()
+            ua = g("REDDIT_USER_AGENT") or "python:egc-pulse:v1.0 (by /u/egc-pulse)"
             req = urllib.request.Request("https://www.reddit.com/api/v1/access_token", data=b"grant_type=client_credentials",
-                                         headers={"Authorization": "Basic " + auth, "User-Agent": g("REDDIT_USER_AGENT") or "egc-pulse/0.2",
+                                         headers={"Authorization": "Basic " + auth, "User-Agent": ua,
                                                   "Content-Type": "application/x-www-form-urlencoded"})
             tok = json.loads(urllib.request.urlopen(req, timeout=10).read()).get("access_token")
-            return done(bool(tok), "Credentials valid. Reddit API reachable." if tok
-                        else "Credentials found, but the platform rejected the request. Check app type, permissions, or API tier.")
+            return done(bool(tok), "Credentials valid. Reddit Data API reachable." if tok
+                        else "Credentials accepted but no token returned. Check the app type ('script' or 'web app') and that Data API access is approved.")
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                return done(False, "Reddit rejected the credentials (401). Re-check REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET and that the app type is 'script' or 'web app'.")
+            if e.code == 403:
+                return done(False, "Reddit returned 403 (forbidden). The app likely needs Data API access approval (Responsible Builder Policy).")
+            if e.code == 429:
+                return done(True, "Credentials valid (rate-limited right now, HTTP 429).")
+            return done(False, "Reddit rejected the request (HTTP %d). Check app type, token validity, or API tier." % e.code)
         except Exception:
-            return done(False, "Credentials found, but the platform rejected the request. Check app type, token validity, or API tier.")
+            return done(False, "Could not reach the Reddit API. Check the keys and network.")
+    if key == "youtube":
+        if not g("YOUTUBE_API_KEY"):
+            return done(False, "Missing YOUTUBE_API_KEY. Create a free key in Google Cloud (enable 'YouTube Data API v3'), add it to demo/.env or your host's environment, then test again.", ["YOUTUBE_API_KEY"])
+        try:
+            # videos.list with a known id costs only 1 quota unit (vs 100 for search) — cheap key check.
+            req = urllib.request.Request("https://www.googleapis.com/youtube/v3/videos?part=id&id=dQw4w9WgXcQ&key="
+                                         + urllib.parse.quote(g("YOUTUBE_API_KEY")))
+            urllib.request.urlopen(req, timeout=10)
+            return done(True, "Credentials valid. YouTube Data API reachable.")
+        except urllib.error.HTTPError as e:
+            if e.code in (400, 403):
+                return done(False, "YouTube rejected the key (HTTP %d). Check the key value and that 'YouTube Data API v3' is enabled in Google Cloud." % e.code)
+            return done(False, "YouTube API error (HTTP %d)." % e.code)
+        except Exception:
+            return done(False, "Could not reach the YouTube API. Check the key and network.")
     if key == "x":
         if not g("X_BEARER_TOKEN"):
             return done(False, "Missing X_BEARER_TOKEN. Add it to demo/.env, restart the server, then test again.", ["X_BEARER_TOKEN"])

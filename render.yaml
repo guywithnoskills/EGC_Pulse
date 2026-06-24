@@ -25,6 +25,10 @@ services:
         sync: false
       - key: SEARCH_CSE_ID
         sync: false
+      # YouTube Data API v3 (live source). Free Google Cloud API key; enable
+      # "YouTube Data API v3" on the key's project. Keyless sources run without it.
+      - key: YOUTUBE_API_KEY
+        sync: false
       # Secrets — Render prompts for these; never stored in the repo. Leave blank
       # to keep that source honestly gated (the app still runs on keyless sources).
       - key: REDDIT_CLIENT_ID

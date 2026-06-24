@@ -221,6 +221,15 @@ CAPABILITY_MATRIX: Dict[str, ConnectorCapability] = {
         date_range_support="provider-dependent historical", max_historical_lookback="Provider contract dependent.",
         coverage_template="Reddit historical data via licensed provider under configured license scope."),
 
+    # YouTube
+    "youtube_official_api": _C("youtube_official_api", "youtube", "YouTube Data API", AccessPath.OFFICIAL_API,
+        SourceStatus.REQUIRES_API_KEY, (HistoricalMode.RECENT_ONLY,), "API key",
+        env_required=("YOUTUBE_API_KEY",),
+        allowed_data_types=("video", "title", "description", "channel", "permalink", "timestamp"),
+        date_range_support="recent (publishedAfter/publishedBefore)", max_historical_lookback="Search is recency-oriented.",
+        required_permissions=("public_data",),
+        coverage_template="YouTube searched via official Data API v3 (video title/description match)."),
+
     # X / Twitter
     "x_recent_search": _C("x_recent_search", "x", "X Recent Search", AccessPath.OFFICIAL_API,
         SourceStatus.REQUIRES_API_KEY, (HistoricalMode.RECENT_ONLY,), "Bearer token",
@@ -404,6 +413,7 @@ CAPABILITY_MATRIX: Dict[str, ConnectorCapability] = {
 # ── fetcher dispatch: maps live modes to real functions in compliant_connectors
 FETCHERS = {
     "reddit_official_api": cc.collect_reddit,
+    "youtube_official_api": cc.collect_youtube,
     "x_recent_search": cc.collect_x,
     "x_full_archive": cc.collect_x,
     "mastodon_public_api": cc.collect_mastodon,
@@ -493,9 +503,12 @@ def platform_summary() -> List[Dict[str, Any]]:
         groups.setdefault(s.platform, []).append(s)
     out = []
     for platform, modes in groups.items():
+        if platform == "manual":          # Manual import retired from the product experience
+            continue
         best = min((m.status for m in modes), key=lambda st: _EASE.index(st))
+        live = any(m.can_collect for m in modes)
         out.append({"platform": platform, "status": best.value,
-                    "live": any(m.can_collect for m in modes),
+                    "live": live, "coming_soon": not live,
                     "modes": [m.key for m in modes]})
     return out
 
@@ -537,6 +550,13 @@ ACCOUNTS = [
      "setup": "Create a Reddit app (script type) and add REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET to demo/.env, then restart.",
      "limitation": "Official API is recency-oriented; deep history needs a licensed/archive provider.",
      "coverage": "Reddit official API (recency-oriented).", "action": "env", "testable": True},
+    {"key": "youtube", "name": "YouTube", "access_path": "official_api",
+     "env_required": ("YOUTUBE_API_KEY",),
+     "env_snippet": ("YOUTUBE_API_KEY=",),
+     "setup": "Create a free API key in Google Cloud (enable 'YouTube Data API v3'), then add YOUTUBE_API_KEY to demo/.env "
+              "(local) or your host's environment (Render), and restart. No OAuth or approval needed.",
+     "limitation": "Recency-oriented video search (title/description). Free quota ~100 searches/day.",
+     "coverage": "YouTube official Data API v3 (recent video search).", "action": "env", "testable": True},
     {"key": "x", "name": "X / Twitter", "access_path": "official_api",
      "env_required": ("X_BEARER_TOKEN",),
      "env_snippet": ("X_BEARER_TOKEN=", "X_FULL_ARCHIVE_ENABLED=false"),
@@ -593,7 +613,7 @@ ACCOUNTS = [
 
 
 def _account_status(key, configured):
-    if key in ("reddit", "x"):
+    if key in ("reddit", "x", "youtube"):
         return SourceStatus.LIVE.value if configured else SourceStatus.REQUIRES_API_KEY.value
     if key == "meta":
         return SourceStatus.LIVE.value if configured else SourceStatus.REQUIRES_CONNECTED_ACCOUNT.value
@@ -609,7 +629,7 @@ def _account_status(key, configured):
 
 
 def _account_can_collect(key, configured):
-    if key in ("reddit", "x", "licensed", "open_web"):
+    if key in ("reddit", "x", "youtube", "licensed", "open_web"):
         return configured
     if key == "manual":
         return True

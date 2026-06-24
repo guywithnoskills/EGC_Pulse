@@ -21,6 +21,7 @@ import re
 import socket
 import ssl
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -107,41 +108,169 @@ def _iso_from_date(d, end=False):
 
 
 # ── OFFICIAL-API connectors (real) ───────────────────────────────────────────
-def collect_reddit(term, start=None, end=None, limit=40):
-    """Official Reddit Data API (OAuth client-credentials). Recency-oriented:
-    the public search has no reliable date filter, so date range is applied to
-    stored data; deep history needs a licensed/archive adapter."""
+# Reddit app-only OAuth bearer tokens live ~1h; cache per-process so a multi-term
+# sweep doesn't re-authenticate (and burn rate-limit) on every single call.
+_reddit_token = {"value": None, "exp": 0.0}
+
+
+def reddit_user_agent():
+    """Reddit REQUIRES a unique, descriptive User-Agent of the form
+    '<platform>:<app-id>:<version> (by /u/<username>)'. Generic agents
+    ('Python/urllib', 'Java', ...) are heavily throttled or blocked. Set
+    REDDIT_USER_AGENT to include your own Reddit username."""
+    return os.environ.get("REDDIT_USER_AGENT") or "python:egc-pulse:v1.0 (by /u/egc-pulse)"
+
+
+def _reddit_bearer_token():
+    """Fetch + cache an application-only OAuth token via the client_credentials
+    grant. Valid for confidential clients (Reddit app type 'script' or 'web app'
+    that hold a client_secret); app-only read access covers /search. Raises a
+    classified RuntimeError on failure so the caller can surface WHY (instead of
+    silently returning nothing)."""
+    if _reddit_token["value"] and time.time() < _reddit_token["exp"]:
+        return _reddit_token["value"]
+    auth = base64.b64encode(
+        ("%s:%s" % (os.environ["REDDIT_CLIENT_ID"], os.environ["REDDIT_CLIENT_SECRET"])).encode()
+    ).decode()
+    req = urllib.request.Request(
+        "https://www.reddit.com/api/v1/access_token",
+        data=b"grant_type=client_credentials",
+        headers={"Authorization": "Basic " + auth, "User-Agent": reddit_user_agent(),
+                 "Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        resp = json.loads(urllib.request.urlopen(req, timeout=12).read().decode("utf-8", "ignore"))
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            raise RuntimeError("reddit auth 401: client_id/secret rejected. Verify the keys and that the app type is 'script' or 'web app'.")
+        if e.code == 403:
+            raise RuntimeError("reddit auth 403: forbidden. The app likely needs Data API access approval (Reddit Responsible Builder Policy).")
+        if e.code == 429:
+            raise RuntimeError("reddit auth 429: rate limited while fetching a token.")
+        raise RuntimeError("reddit auth HTTP %d while fetching a token." % e.code)
+    except Exception as e:
+        raise RuntimeError("reddit auth failed (network/TLS): %s" % (str(e)[:80]))
+    tok = resp.get("access_token")
+    if not tok:
+        raise RuntimeError("reddit auth: no access_token returned (error=%s)." % resp.get("error", "unknown"))
+    _reddit_token["value"] = tok
+    _reddit_token["exp"] = time.time() + min(int(resp.get("expires_in", 3600)) - 60, 3500)
+    return tok
+
+
+def collect_reddit(term, start=None, end=None, limit=100):
+    """Official Reddit Data API (OAuth app-only / client_credentials). Site-wide
+    post search, recency-oriented: the public search has no reliable date filter,
+    so the date range is applied to stored data; deep history needs a licensed/
+    archive adapter. NOTE: /search returns POSTS (links) only, not comments."""
     if not env("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"):
         return []
+    token = _reddit_bearer_token()
+    url = "https://oauth.reddit.com/search?" + urllib.parse.urlencode({
+        "q": term, "sort": "new", "limit": max(1, min(int(limit or 100), 100)),
+        "type": "link", "restrict_sr": "false", "raw_json": 1})
+    req = urllib.request.Request(url, headers={
+        "Authorization": "Bearer " + token, "User-Agent": reddit_user_agent()})
     try:
-        auth = base64.b64encode(
-            ("%s:%s" % (os.environ["REDDIT_CLIENT_ID"], os.environ["REDDIT_CLIENT_SECRET"])).encode()
-        ).decode()
-        treq = urllib.request.Request(
-            "https://www.reddit.com/api/v1/access_token",
-            data=b"grant_type=client_credentials",
-            headers={"Authorization": "Basic " + auth, "User-Agent": UA,
-                     "Content-Type": "application/x-www-form-urlencoded"})
-        token = json.loads(urllib.request.urlopen(treq, timeout=10).read())["access_token"]
-        sreq = urllib.request.Request(
-            "https://oauth.reddit.com/search?"
-            + urllib.parse.urlencode({"q": term, "sort": "new", "limit": limit, "type": "link"}),
-            headers={"Authorization": "Bearer " + token, "User-Agent": UA})
-        data = json.loads(urllib.request.urlopen(sreq, timeout=10).read())
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            data = json.loads(resp.read().decode("utf-8", "ignore"))
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            raise RuntimeError("reddit 429: rate limited (limit is 100 QPM per client_id). Back off and retry.")
+        if e.code in (401, 403):
+            _reddit_token["value"] = None  # token stale/rejected — force a fresh auth next call
+            raise RuntimeError("reddit search HTTP %d: token rejected or Data API access not approved." % e.code)
+        raise RuntimeError("reddit search HTTP %d." % e.code)
     except Exception as e:
-        print("  [reddit] %s" % e)
-        return []
+        raise RuntimeError("reddit search failed: %s" % (str(e)[:80]))
     out = []
     for c in data.get("data", {}).get("children", []):
         d = c.get("data", {})
         out.append({
             "platform": "reddit", "platform_post_id": d.get("id"), "author": d.get("author"),
             "content": (d.get("title") or "") + (("\n" + d["selftext"]) if d.get("selftext") else ""),
-            "url": "https://reddit.com" + (d.get("permalink") or ""),
+            "url": "https://www.reddit.com" + (d.get("permalink") or ""),
             "posted_at": datetime.fromtimestamp(d.get("created_utc", 0), timezone.utc).isoformat(),
             "engagement": int(d.get("score", 0)) + int(d.get("num_comments", 0)),
             "extra": {"subreddit": d.get("subreddit"), "score": d.get("score"),
                       "comments": d.get("num_comments")},
+        })
+    return out
+
+
+def _youtube_stats(video_ids, key):
+    """Batch-fetch public statistics (views/likes/comments) for up to 50 video
+    ids per videos.list call (1 quota unit each). Best-effort — returns {} on
+    any error so a stats hiccup never blocks the mentions themselves."""
+    out = {}
+    ids = [v for v in (video_ids or []) if v]
+    for i in range(0, len(ids), 50):
+        chunk = ids[i:i + 50]
+        url = "https://www.googleapis.com/youtube/v3/videos?" + urllib.parse.urlencode(
+            {"part": "statistics", "id": ",".join(chunk), "key": key})
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": UA}), timeout=12) as resp:
+                d = json.loads(resp.read().decode("utf-8", "ignore"))
+        except Exception:
+            continue
+        for it in d.get("items", []):
+            s = it.get("statistics") or {}
+            out[it.get("id")] = {"views": int(s.get("viewCount") or 0),
+                                 "likes": int(s.get("likeCount") or 0),
+                                 "comments": int(s.get("commentCount") or 0)}
+    return out
+
+
+def collect_youtube(term, start=None, end=None, limit=50):
+    """Official YouTube Data API v3 search.list (API-key auth, public data only).
+    Returns recent videos whose title/description match the term. Quota: a
+    search.list call costs 100 units and the free tier is 10,000 units/day
+    (~100 searches/day). No OAuth and no approval gate — a self-service Google
+    Cloud API key is enough. Raises a classified error so failures aren't silent."""
+    key = os.environ.get("YOUTUBE_API_KEY")
+    if not key:
+        return []
+    params = {"key": key, "q": term, "part": "snippet", "type": "video",
+              "order": "date", "maxResults": max(1, min(int(limit or 50), 50))}
+    if start:
+        params["publishedAfter"] = _iso_from_date(start)
+    if end:
+        params["publishedBefore"] = _iso_from_date(end, end=True)
+    url = "https://www.googleapis.com/youtube/v3/search?" + urllib.parse.urlencode(params)
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": UA}), timeout=12) as resp:
+            data = json.loads(resp.read().decode("utf-8", "ignore"))
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            raise RuntimeError("youtube 403: API key invalid, 'YouTube Data API v3' not enabled, or daily quota (10k units) exceeded.")
+        if e.code == 400:
+            raise RuntimeError("youtube 400: bad request (check the API key value).")
+        if e.code == 429:
+            raise RuntimeError("youtube 429: rate limited.")
+        raise RuntimeError("youtube search HTTP %d." % e.code)
+    except Exception as e:
+        raise RuntimeError("youtube search failed: %s" % (str(e)[:80]))
+    items = data.get("items", [])
+    stats = _youtube_stats([(it.get("id") or {}).get("videoId") for it in items], key)
+    out = []
+    for it in items:
+        vid = (it.get("id") or {}).get("videoId")
+        sn = it.get("snippet") or {}
+        if not vid:
+            continue
+        st = stats.get(vid, {})
+        views, likes, comments = st.get("views", 0), st.get("likes", 0), st.get("comments", 0)
+        title = strip_html(sn.get("title") or "")
+        desc = strip_html(sn.get("description") or "")
+        out.append({
+            "platform": "youtube", "platform_post_id": vid,
+            "author": strip_html(sn.get("channelTitle") or "") or None,
+            "content": title + (("\n" + desc) if desc else ""),
+            "url": "https://www.youtube.com/watch?v=" + vid,
+            "posted_at": sn.get("publishedAt") or now_iso(),
+            "engagement": likes + comments,   # interactions
+            "reach": views,                    # views = public reach/visibility proxy
+            "extra": {"channel": sn.get("channelTitle"), "channel_id": sn.get("channelId"),
+                      "views": views, "likes": likes, "comments": comments},
         })
     return out
 
