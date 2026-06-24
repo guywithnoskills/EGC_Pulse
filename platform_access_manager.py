@@ -506,7 +506,11 @@ def platform_summary() -> List[Dict[str, Any]]:
         if platform == "manual":          # Manual import retired from the product experience
             continue
         best = min((m.status for m in modes), key=lambda st: _EASE.index(st))
-        live = any(m.can_collect for m in modes)
+        # LIVE only if a mode is BOTH configured to collect AND has a real listening
+        # fetcher. Meta/Instagram/Facebook connected-account access is owned-account
+        # ANALYTICS, not public listening, and has no listening fetcher — so even with
+        # a META_ACCESS_TOKEN present it must never show as a live listening source.
+        live = any(m.can_collect and m.key in FETCHERS for m in modes)
         out.append({"platform": platform, "status": best.value,
                     "live": live, "coming_soon": not live,
                     "modes": [m.key for m in modes]})

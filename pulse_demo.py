@@ -456,6 +456,10 @@ def metrics(keyword=None, start=None, end=None):
                              "COALESCE(SUM(reach),0) r FROM mentions WHERE " + where + " GROUP BY p ORDER BY r DESC, e DESC", wp).fetchall()
         top = c.execute("SELECT content, url, COALESCE(display_platform, platform) p, engagement, reach, sentiment, author "
                         "FROM mentions WHERE " + where + " ORDER BY reach DESC, engagement DESC LIMIT 5", wp).fetchall()
+        # Per RAW source platform (open_web/youtube/bluesky) so the Sources cards can
+        # show an accurate "N mentions in range" count keyed by source, not display name.
+        src_counts = c.execute("SELECT platform p, COUNT(*) n FROM mentions WHERE " + where + " GROUP BY platform", wp).fetchall()
+        tiktok_refs = c.execute("SELECT COUNT(*) n FROM mentions WHERE " + where + " AND url LIKE '%tiktok.com%'", wp).fetchone()
     sc = {r["s"]: r["n"] for r in sent}
     pos, neg, neu = sc.get("positive", 0), sc.get("negative", 0), sc.get("neutral", 0)
     denom = max(pos + neg + neu, 1)
@@ -485,6 +489,8 @@ def metrics(keyword=None, start=None, end=None):
             "authors": [{"author": r["a"], "platform": r["p"], "mentions": r["n"]} for r in authors],
             "keywords": [{"keyword": r["k"], "count": r["n"]} for r in kw_rows],
             "coverage": struth.coverage_summary_for_mentions([dict(r) for r in cov_rows]),
+            "sourceCounts": {r["p"]: r["n"] for r in src_counts},
+            "tiktokRefs": tiktok_refs["n"] if tiktok_refs else 0,
             "tracked": [k["label"] for k in tracked_keywords()]}
 
 

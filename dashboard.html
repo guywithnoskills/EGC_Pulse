@@ -522,20 +522,20 @@ function sourceCard(p){
   const k=p.platform;const nm=PLAT_NAMES[k]||cap(k);const live=!!p.live;
   const stat=live?'<span class="badge live"><span class="bd"></span>Live</span>':'<span class="badge soon"><span class="bd"></span>Coming soon</span>';
   let metric='';
-  if(live){const c=(lastMetrics&&(lastMetrics.platforms||[]).find(x=>String(x.platform).toLowerCase()===nm.toLowerCase()));
-    metric='<div class="row2"><span class="metric"><b>'+(c?fmt(c.value):'0')+'</b> mentions in range</span></div>';}
+  if(live){const c=(lastMetrics&&lastMetrics.sourceCounts&&lastMetrics.sourceCounts[k])||0;
+    metric='<div class="row2"><span class="metric"><b>'+fmt(c)+'</b> mentions in range</span></div>';}
   else{metric='<div class="row2"><span class="metric">'+esc(p.status||'Requires access')+'</span></div>';}
   return '<div class="card src '+(live?'':'is-soon')+'"><div class="top"><div class="ic">'+esc(SRC_ICON[k]||'?')+'</div>'+
     '<div style="min-width:0;flex:1"><div class="nm">'+esc(nm)+'</div><div class="path">'+esc(SRC_PATH[k]||'')+'</div></div>'+stat+'</div>'+
     '<div class="desc">'+esc(SRC_DESC[k]||'')+'</div>'+metric+'</div>';
 }
 function tiktokCard(p){
-  const cnt=lastMetrics&&(lastMetrics.platforms||[]).find(x=>String(x.platform).toLowerCase()==='tiktok');
+  const cnt=(lastMetrics&&lastMetrics.tiktokRefs)||0;
   return '<div class="card src"><div class="top"><div class="ic">'+esc(SRC_ICON.tiktok)+'</div>'+
     '<div style="min-width:0;flex:1"><div class="nm">TikTok</div><div class="path">Open web + known-URL oEmbed</div></div>'+
     '<span class="badge ow"><span class="bd"></span>Open web</span></div>'+
     '<div class="desc">Surfaced via open-web discovery and enriched from known TikTok video URLs (official oEmbed). Not native keyword listening; TikTok LIVE is not available compliantly.</div>'+
-    '<div class="row2"><span class="metric"><b>'+(cnt?fmt(cnt.value):'0')+'</b> mentions in range</span>'+
+    '<div class="row2"><span class="metric"><b>'+fmt(cnt)+'</b> mentions in range</span>'+
     '<button class="btn ghost" id="ttEnrichBtn" style="height:30px;font-size:12px;padding:0 11px">Add TikTok URLs</button></div></div>';
 }
 function renderSources(platforms){
