@@ -17,16 +17,19 @@ invents a figure.
 
 | Source | Status | Mentions | Engagement | Views / Impressions | Notes |
 |---|---|---|---|---|---|
-| **YouTube Data API v3** | Live | Video search match | `likeCount + commentCount` | `viewCount` (real) | Views are the strongest public reach signal Pulse has. |
-| **Bluesky (AT Protocol)** | Live | Public post search | `likes + reposts + replies` | none | No public view count exists, so impressions are not measured. |
-| **Open web (Google CSE)** | Live | Public page references | none | none | Presence/mention signal only; no engagement or views. |
+| **YouTube Data API v3** | Live (primary) | Video search match | `likeCount + commentCount` | `viewCount` (real) | Views are the strongest public reach signal Pulse has. Collected first. |
+| **Open web (Brave Search)** | Live (primary) | Public page references, TikTok-first | none | none | Presence/mention signal only; no engagement or views. TikTok query runs first. |
+| **TikTok oEmbed (known URL)** | Live | Known video URL enrichment | none | none | Title/author only; no public engagement or view metric. |
 | **Owned accounts (Meta Graph)** | Connect to enable | n/a | post engagements | **impressions + unique reach (real)** | The only compliant source of *true* impressions and unique reach. |
 | Reddit, X, Instagram, Facebook, TikTok, Licensed | Coming soon | — | — | — | Connectors exist but are gated; not counted until enabled. |
+
+YouTube and TikTok (via the TikTok-first open-web query) are prioritized as the
+primary sources: collection sorts them ahead of everything else.
 
 Per-source field mapping (from `compliant_connectors.py`):
 
 - **YouTube:** `engagement = likeCount + commentCount`, `reach = viewCount`.
-- **Bluesky:** `engagement = likeCount + repostCount + replyCount`, `reach = 0`.
+- **Open web / News & TikTok references:** `engagement = 0`, `reach = 0` (no public metric).
 - **Reddit (gated):** `engagement = score + num_comments`.
 - **X (gated):** `engagement = like + retweet + reply + quote counts`.
 - **Owned Meta accounts:** `impressions`, `reach`, `engagement` come directly from
@@ -55,26 +58,40 @@ engagement was set at collection time using the per-source mapping in section 1
 `totalImpressions` = `SUM(reach_column)` across in-scope mentions — i.e. the sum
 of **measured views/displays** we actually received from a platform
 (YouTube `viewCount`; owned-account impressions when a Meta account is connected).
-Sources that expose no view count (Bluesky, open web) contribute 0 impressions,
-so impressions reflect only what was genuinely measured.
+Sources that expose no view count (open web / News, TikTok references) contribute
+0 impressions, so impressions reflect only what was genuinely measured.
 
 > Naming note: internally the column is `reach`, but it stores **measured views**,
 > which is conceptually *impressions*. The UI now surfaces it as **Impressions**
 > for accuracy.
 
-### 2.4 Reach (estimated)
-Public listening APIs do **not** expose unique reach (unique people reached).
-Pulse therefore reports an explicit estimate:
+### 2.4 Reach (estimated audience reached)
+Public listening APIs do **not** expose unique reach (unique people reached), so
+Pulse reports an explicit **estimate of the audience actually reached** — not
+engagement, and never follower count. It is computed **per item** and summed, so
+each mention contributes the best estimate its data supports:
 
 ```
-estimatedReach = round(totalImpressions * REACH_FACTOR)     # REACH_FACTOR = 0.75
+per item:
+  if measured views > 0:   reach = views * VIEW_TO_REACH          # VIEW_TO_REACH = 0.75
+  elif engagement  > 0:   reach = engagement * ENGAGEMENT_TO_REACH # ENGAGEMENT_TO_REACH = 22.0  (~1 / 4.5%)
+  else:                   reach = 0                                # news/open web: unknown, never fabricated
+estimatedReach = round( SUM(per-item reach) )
 ```
 
-`REACH_FACTOR` (default **0.75**) is the assumed unique-audience fraction of total
-impressions — a single configurable, documented assumption rather than a hidden
-fudge. It is labeled **"est."** everywhere in the UI. When an **owned Meta
-account** is connected, true unique reach from the Insights API is shown instead
-of the estimate.
+- **Views → unique viewers** (`VIEW_TO_REACH = 0.75`): views are the strongest
+  public exposure signal; the factor discounts repeat views to approximate unique
+  people. This is the main driver, since YouTube is a primary source.
+- **Engagement → reach** (`ENGAGEMENT_TO_REACH = 22.0`): for items that have
+  engagement but no view count, reach is backed out from a documented ~4.5%
+  engagement rate (reach ≈ engagement ÷ 0.045). This estimates audience from
+  interaction without ever using raw engagement *as* reach.
+- **No signal → 0:** open-web/News references with neither views nor engagement
+  contribute nothing. They are never assigned a fabricated number.
+
+Both factors are single, documented assumptions rather than hidden fudges, and the
+metric is labeled **"est."** in the UI. When an **owned Meta account** is
+connected, true unique reach from the Insights API is shown instead of the estimate.
 
 ### 2.5 Sentiment
 Per-mention sentiment is classified at ingest by a transparent weighted lexicon
@@ -164,17 +181,18 @@ directly comparable.
 
 ## 5. Limitations (stated honestly)
 
-- **Unique reach is estimated**, not measured, for all public sources
-  (`impressions × 0.75`). Only connected owned accounts yield true reach.
+- **Unique reach is estimated**, not measured, for all public sources (views ×
+  0.75, or engagement × 22 where views are absent). Only connected owned accounts
+  yield true reach.
 - **Impressions exist only where a platform reports views** (today: YouTube).
-  Bluesky and open-web mentions contribute presence, not impressions.
+  Open-web / News and TikTok references contribute presence, not impressions.
 - **Sentiment is lexicon-based** — fast, transparent, and offline, but it does not
   capture sarcasm, emoji-only sentiment, slang, or non-English text well.
-- **Engagement is not normalized across platforms** — a YouTube "like" and a
-  Bluesky "like" are summed as-is; cross-platform comparisons are directional.
+- **Engagement is not normalized across platforms** — counts are summed as-is, so
+  cross-platform comparisons are directional.
 - **Topics are surface n-grams**, not entity/aspect extraction.
-- **Coverage depends on quotas** — the Google CSE free tier is 100 queries/day;
-  exhaustion is surfaced, not silently treated as "no results."
+- **Coverage depends on quotas** — the Brave Search free tier allows roughly 1,000
+  queries/month; exhaustion is surfaced, not silently treated as "no results."
 
 ---
 
@@ -184,7 +202,7 @@ directly comparable.
    impressions and unique reach for the brand's own channels.
 2. **Per-platform reach factors** instead of one global 0.75, calibrated as real
    reach/impression ratios become available.
-3. **Follower-weighted reach** for text platforms (Bluesky/X) once author audience
+3. **Follower-weighted reach** for text platforms (X, Reddit) once author audience
    size is captured, giving a defensible impressions estimate where views are absent.
 4. **Upgrade sentiment** to a model that handles negation, emoji, and sarcasm, and
    add a confidence score and language detection.

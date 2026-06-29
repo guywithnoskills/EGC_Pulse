@@ -57,7 +57,7 @@ _DISCUSS = [
 
 # source_key -> source-truth facts. Keys match platform_access_manager mode keys.
 SOURCE_TRUTH = {
-    "news_gdelt": dict(sp="gdelt", disp="Open Web / News", searched="open web / news",
+    "news_gdelt": dict(sp="gdelt", disp="News", searched="open web / news",
                        ct=OPEN_WEB_REF, conf="source_verified_open_web_reference",
                        note="Open-web/news source that references a platform. Not platform-native social data."),
     "hackernews_public_api": dict(sp="hacker_news", disp="Hacker News", searched="hacker news",
@@ -139,13 +139,13 @@ SOURCE_TRUTH = {
                                      ct=DIRECT_LICENSED, conf="provider_supplied_licensed_feed",
                                      note="TikTok data supplied by a licensed provider."),
     # ── compliant discovery layer (open web + known-URL enrichment) ──
-    "open_web_social_discovery": dict(sp="open_web_discovery", disp="Open Web / News", searched="open web",
+    "open_web_social_discovery": dict(sp="open_web_discovery", disp="News", searched="open web",
                                       ct=OPEN_WEB_REF, conf="source_verified_open_web_reference",
                                       note="Open-web discovery result referencing a platform. It is not platform-native social data."),
-    "instagram_known_url_reference": dict(sp="open_web_discovery", disp="Open Web / News", searched="open web",
+    "instagram_known_url_reference": dict(sp="open_web_discovery", disp="News", searched="open web",
                                           ct=OPEN_WEB_REF, conf="source_verified_open_web_reference",
                                           note="Open-web result linking to Instagram. It is not Instagram platform data."),
-    "facebook_known_url_reference": dict(sp="open_web_discovery", disp="Open Web / News", searched="open web",
+    "facebook_known_url_reference": dict(sp="open_web_discovery", disp="News", searched="open web",
                                          ct=OPEN_WEB_REF, conf="source_verified_open_web_reference",
                                          note="Open-web result linking to Facebook. It is not Facebook platform data."),
     "tiktok_oembed_known_url": dict(sp="tiktok_oembed", disp="TikTok URL", searched="known TikTok URL enrichment",

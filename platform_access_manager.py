@@ -465,7 +465,8 @@ def resolve_source(cap: ConnectorCapability) -> ResolvedSource:
 # stays in compliant_connectors.py, but these are no longer shown, counted, or
 # collected by default. Open web social discovery replaces this group.
 HIDDEN_SOURCE_KEYS = {"mastodon_public_api", "lemmy_public_api", "nostr_public_relays",
-                      "peertube_public_search", "hackernews_public_api", "news_gdelt"}
+                      "peertube_public_search", "hackernews_public_api", "news_gdelt",
+                      "bluesky_public_api"}
 
 
 def get_source_matrix() -> List[ResolvedSource]:

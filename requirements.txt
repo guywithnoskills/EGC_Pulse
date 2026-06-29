@@ -1,0 +1,4 @@
+# EGC Pulse runtime dependencies.
+# python-pptx powers the PowerPoint report export (/api/export/report.pptx).
+# Everything else in the app is Python standard library.
+python-pptx==1.0.2

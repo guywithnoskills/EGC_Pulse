@@ -220,7 +220,8 @@ def init_db():
         truth_cols = {"display_platform": "TEXT", "source_platform": "TEXT", "searched_platform": "TEXT",
                       "discussed_platforms": "TEXT", "direct_platform_data": "INTEGER",
                       "platform_coverage_type": "TEXT", "coverage_label": "TEXT", "coverage_note": "TEXT",
-                      "access_path": "TEXT", "source_key": "TEXT", "confidence_level": "TEXT", "run_id": "TEXT"}
+                      "access_path": "TEXT", "source_key": "TEXT", "confidence_level": "TEXT", "run_id": "TEXT",
+                      "result_type": "TEXT", "description": "TEXT"}
         need_backfill = "platform_coverage_type" not in cols
         for col, typ in truth_cols.items():
             if col not in cols:
@@ -285,7 +286,7 @@ def ingest(records):
         for r in records:
             if is_suppressed(r["platform"], r["platform_post_id"]):
                 continue
-            label, score = analyze_sentiment(r.get("content", ""))
+            label, score = analyze_sentiment(((r.get("content") or "") + " " + (r.get("description") or "")).strip())
             posted = r.get("posted_at") or now
             ch = hashlib.sha256((r["platform"] + ":" + re.sub(r"\s+", " ", (r.get("content") or "").lower())).encode()).hexdigest()
             try:
@@ -293,15 +294,17 @@ def ingest(records):
                     "INSERT OR IGNORE INTO mentions (platform, platform_post_id, keyword, author, content, "
                     "content_hash, url, lang, posted_at, posted_date, ingested_at, engagement, reach, sentiment, sentiment_score, "
                     "display_platform, source_platform, searched_platform, discussed_platforms, direct_platform_data, "
-                    "platform_coverage_type, coverage_label, coverage_note, access_path, source_key, confidence_level, run_id) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "platform_coverage_type, coverage_label, coverage_note, access_path, source_key, confidence_level, run_id, "
+                    "result_type, description) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (r["platform"], str(r["platform_post_id"]), r.get("keyword"), r.get("author"),
                      r.get("content"), ch, r.get("url"), r.get("lang", "en"), posted, posted[:10],
                      now, int(r.get("engagement", 0)), int(r.get("reach", 0)), label, score,
                      r.get("display_platform"), r.get("source_platform"), r.get("searched_platform"),
                      r.get("discussed_platforms") or "[]", int(r.get("direct_platform_data") or 0),
                      r.get("platform_coverage_type"), r.get("coverage_label"), r.get("coverage_note"),
-                     r.get("access_path"), r.get("source_key"), r.get("confidence_level"), r.get("run_id")))
+                     r.get("access_path"), r.get("source_key"), r.get("confidence_level"), r.get("run_id"),
+                     r.get("result_type"), r.get("description")))
                 n += cur.rowcount
             except sqlite3.Error:
                 pass
@@ -391,7 +394,7 @@ def manual_import(term, text="", rows=None):
 # Retired open-network platforms are hidden from the product experience (feed,
 # metrics, top sources, exports, coverage). Their connector code remains, but
 # stored rows from them are not surfaced as active listening data.
-_HIDDEN_PLATFORMS = ("mastodon", "lemmy", "nostr", "peertube", "hackernews", "news")
+_HIDDEN_PLATFORMS = ("mastodon", "lemmy", "nostr", "peertube", "hackernews", "news", "bluesky")
 
 
 def _filters(keyword=None, start=None, end=None):
@@ -415,9 +418,13 @@ STOPWORDS = set("the a an and or for to of in on at is are was be it this that w
 # ── Analytics model (documented in ANALYTICS.md) ──────────────────────────────
 # Impressions = measured views/displays we actually receive from a platform API
 #   (YouTube viewCount; owned-account impressions when a Meta account is connected).
-# Reach (estimated) = estimated unique audience = impressions * REACH_FACTOR. Public
-#   listening APIs do not expose unique reach, so this is a clearly-labeled estimate.
-REACH_FACTOR = 0.75
+# Reach (estimated audience reached) = per-item estimate, NOT engagement or follower count:
+#   - items with measured views   -> unique viewers  = views * VIEW_TO_REACH (0.75)
+#   - items with engagement, no views -> reach = engagement * ENGAGEMENT_TO_REACH (~1/4.5%)
+#   - items with neither (news/open web) -> 0 (unknown; never fabricated)
+# Public listening APIs do not expose unique reach, so this is a clearly-labeled estimate.
+REACH_FACTOR = 0.75            # VIEW_TO_REACH: unique viewers as a fraction of total views
+ENGAGEMENT_TO_REACH = 22.0     # ~1 / 4.5% engagement rate, to back out reach from engagement
 
 
 def visibility_score(mentions, impressions, engagement, net_sentiment):
@@ -432,6 +439,28 @@ def visibility_score(mentions, impressions, engagement, net_sentiment):
     eng = min(lg(engagement) / 5.0, 1.0)     # ~100,000 interactions -> full marks
     sent = (max(-100, min(100, net_sentiment or 0)) + 100) / 200.0
     return int(round(100 * (0.30 * vol + 0.30 * amp + 0.25 * eng + 0.15 * sent)))
+
+
+def _daily_buckets(vmap, start, end, cap=420):
+    """Continuous daily volume series from start..end with zero days filled, so the
+    graph shows an unbroken timeline. Falls back to the sparse non-zero points if the
+    range is absent, invalid, or wider than `cap` days."""
+    sparse = [{"t": k, "value": v} for k, v in sorted(vmap.items())]
+    if not start or not end:
+        return sparse
+    try:
+        d0 = datetime.strptime(start, "%Y-%m-%d").date()
+        d1 = datetime.strptime(end, "%Y-%m-%d").date()
+    except Exception:
+        return sparse
+    if d1 < d0 or (d1 - d0).days > cap:
+        return sparse
+    out, cur = [], d0
+    while cur <= d1:
+        s = cur.isoformat()
+        out.append({"t": s, "value": vmap.get(s, 0)})
+        cur += timedelta(days=1)
+    return out
 
 
 def metrics(keyword=None, start=None, end=None):
@@ -452,6 +481,11 @@ def metrics(keyword=None, start=None, end=None):
         cov_rows = c.execute("SELECT display_platform, platform_coverage_type, direct_platform_data, "
                              "discussed_platforms FROM mentions WHERE " + where + " LIMIT 2000", wp).fetchall()
         agg = c.execute("SELECT COALESCE(SUM(engagement),0) e, COALESCE(SUM(reach),0) r FROM mentions WHERE " + where, wp).fetchone()
+        # Estimated audience reached (per item, summed): measured views -> unique viewers
+        # (x VIEW_TO_REACH); items with engagement but no views -> back out reach from an
+        # assumed engagement rate (engagement x ENGAGEMENT_TO_REACH). Never uses follower counts.
+        reach_est = c.execute("SELECT COALESCE(SUM(CASE WHEN reach>0 THEN reach*0.75 "
+                              "WHEN engagement>0 THEN engagement*22.0 ELSE 0 END),0) r FROM mentions WHERE " + where, wp).fetchone()
         plat_eng = c.execute("SELECT COALESCE(display_platform, platform) p, COALESCE(SUM(engagement),0) e, "
                              "COALESCE(SUM(reach),0) r FROM mentions WHERE " + where + " GROUP BY p ORDER BY r DESC, e DESC", wp).fetchall()
         top = c.execute("SELECT content, url, COALESCE(display_platform, platform) p, engagement, reach, sentiment, author "
@@ -471,7 +505,7 @@ def metrics(keyword=None, start=None, end=None):
                 freq[tok] = freq.get(tok, 0) + 1
     topics = sorted(freq.items(), key=lambda kv: kv[1], reverse=True)[:8]
     impressions = agg["r"]                                    # measured views/displays
-    est_reach = int(round(impressions * REACH_FACTOR))        # estimated unique audience
+    est_reach = int(round(reach_est["r"]))                    # estimated audience reached (per-item model)
     net = round(100 * (pos - neg) / denom)
     return {"kpis": {"totalMentions": total, "netSentiment": net,
                      "platforms": len(plats), "positivePct": round(100 * pos / denom),
@@ -482,7 +516,7 @@ def metrics(keyword=None, start=None, end=None):
             "topContent": [{"content": (r["content"] or "").replace("\n", " ")[:160], "url": r["url"],
                             "platform": r["p"], "engagement": r["engagement"], "reach": r["reach"],
                             "sentiment": r["sentiment"], "author": r["author"]} for r in top],
-            "volume": [{"t": r["d"], "value": r["n"]} for r in vol],
+            "volume": _daily_buckets({r["d"]: r["n"] for r in vol}, start, end),
             "sentiment": {"positive": pos, "neutral": neu, "negative": neg},
             "platforms": [{"platform": r["p"], "value": r["n"]} for r in plats],
             "topics": [{"label": k, "count": v} for k, v in topics],
@@ -503,7 +537,8 @@ def recent(limit=25, keyword=None, platform=None, sentiment=None, start=None, en
     args.append(limit)
     with db() as c:
         return [dict(r) for r in c.execute(
-            "SELECT platform, keyword, author, content, url, posted_at, sentiment, engagement, reach, "
+            "SELECT platform, keyword, author, content, description, result_type, url, posted_at, posted_date, ingested_at, "
+            "sentiment, engagement, reach, "
             "display_platform, source_platform, searched_platform, discussed_platforms, direct_platform_data, "
             "platform_coverage_type, coverage_label, coverage_note, source_key, confidence_level "
             "FROM mentions WHERE " + where + " ORDER BY posted_at DESC LIMIT ?", args).fetchall()]
@@ -593,6 +628,318 @@ def report_html(keyword=None, start=None, end=None):
         cov_html, plat, feed)
 
 
+def _fmt_n(n):
+    """Compact number for slides: 1234567 -> 1.2M, 12300 -> 12.3K."""
+    try:
+        n = float(n or 0)
+    except Exception:
+        return "0"
+    for div, suf in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if abs(n) >= div:
+            s = ("%.1f" % (n / div)).rstrip("0").rstrip(".")
+            return s + suf
+    return "{:,}".format(int(round(n)))
+
+
+def report_pptx(keyword=None, start=None, end=None):
+    """Build a PowerPoint deck that mirrors the dashboard: same metrics, charts,
+    insights and data, in the same dark theme. Returns .pptx bytes. Requires
+    python-pptx (listed in requirements.txt); raises RuntimeError if unavailable."""
+    try:
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+        from pptx.dml.color import RGBColor
+        from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+        from pptx.enum.shapes import MSO_SHAPE
+        from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION, XL_LABEL_POSITION
+        from pptx.chart.data import CategoryChartData
+    except Exception as exc:  # pragma: no cover - dependency guard
+        raise RuntimeError("python-pptx is not installed. Add it to requirements.txt and redeploy.") from exc
+
+    m = metrics(keyword, start, end)
+    k = m["kpis"]
+    s = m["sentiment"]
+    cov = m["coverage"]
+
+    # Dashboard palette (kept in sync with dashboard.html tokens).
+    DARK = RGBColor(0x19, 0x1A, 0x1D)
+    PANEL = RGBColor(0x21, 0x23, 0x29)
+    LINE = RGBColor(0x34, 0x37, 0x3F)
+    INK = RGBColor(0xEE, 0xF0, 0xF3)
+    MUT = RGBColor(0x9A, 0x9F, 0xA8)
+    FAINT = RGBColor(0x6D, 0x72, 0x7B)
+    BLUE = RGBColor(0x3D, 0x7E, 0xFF)
+    POS = RGBColor(0x3F, 0xB9, 0x50)
+    NEU = RGBColor(0x8A, 0x90, 0x99)
+    NEG = RGBColor(0xE5, 0x5B, 0x4C)
+    FONT = "Lato"
+
+    def ymd(d):
+        try:
+            y, mo, da = (d or "")[:10].split("-")
+            return y[2:] + "/" + mo + "/" + da
+        except Exception:
+            return d or ""
+    rng = (ymd(start) + " to " + ymd(end)) if (start or end) else "all available dates"
+
+    prs = Presentation()
+    prs.slide_width = Inches(13.333)
+    prs.slide_height = Inches(7.5)
+    BLANK = prs.slide_layouts[6]
+    SW, SH = 13.333, 7.5
+
+    def new_slide():
+        sl = prs.slides.add_slide(BLANK)
+        sl.background.fill.solid()
+        sl.background.fill.fore_color.rgb = DARK
+        return sl
+
+    def text(sl, l, t, w, h, runs, size=18, color=INK, bold=False, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP):
+        tb = sl.shapes.add_textbox(Inches(l), Inches(t), Inches(w), Inches(h))
+        tf = tb.text_frame
+        tf.word_wrap = True
+        tf.vertical_anchor = anchor
+        items = runs if isinstance(runs, list) else [(runs, size, color, bold)]
+        for i, item in enumerate(items):
+            txt, sz, col, bd = item
+            p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+            p.alignment = align
+            r = p.add_run()
+            r.text = txt
+            r.font.size = Pt(sz)
+            r.font.bold = bd
+            r.font.color.rgb = col
+            r.font.name = FONT
+        return tb
+
+    def card(sl, l, t, w, h, fill=PANEL, edge=LINE):
+        sh = sl.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(l), Inches(t), Inches(w), Inches(h))
+        sh.fill.solid()
+        sh.fill.fore_color.rgb = fill
+        sh.line.color.rgb = edge
+        sh.line.width = Pt(0.75)
+        sh.shadow.inherit = False
+        try:
+            sh.adjustments[0] = 0.06
+        except Exception:
+            pass
+        return sh
+
+    def header(sl, title, sub=None):
+        bar = sl.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0.7), Inches(0.62), Inches(0.12), Inches(0.46))
+        bar.fill.solid(); bar.fill.fore_color.rgb = BLUE; bar.line.fill.background(); bar.shadow.inherit = False
+        text(sl, 0.95, 0.5, 9.5, 0.7, title, 26, INK, True)
+        text(sl, SW - 4.7, 0.6, 4.0, 0.4, [("EGC PULSE   ·   " + rng, 11, FAINT, True)], align=PP_ALIGN.RIGHT)
+        if sub:
+            text(sl, 0.97, 1.12, 11.0, 0.4, [(sub, 12, MUT, False)])
+
+    def style_chart(chart, legend=False):
+        chart.has_title = False
+        try:
+            chart.font.size = Pt(10)
+            chart.font.color.rgb = INK
+            chart.font.name = FONT
+        except Exception:
+            pass
+        chart.has_legend = legend
+        if legend:
+            chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+            chart.legend.include_in_layout = False
+            chart.legend.font.color.rgb = MUT
+            chart.legend.font.size = Pt(10)
+
+    # Slide 1: title
+    sl = new_slide()
+    for dx, dy, c in [(0, 0, BLUE), (0.42, 0, RGBColor(0x2B, 0x57, 0xB0)),
+                      (0, 0.42, RGBColor(0x2B, 0x57, 0xB0)), (0.42, 0.42, RGBColor(0x4E, 0x53, 0x5C))]:
+        sq = sl.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.9 + dx), Inches(2.35 + dy), Inches(0.36), Inches(0.36))
+        sq.fill.solid(); sq.fill.fore_color.rgb = c; sq.line.fill.background(); sq.shadow.inherit = False
+        try:
+            sq.adjustments[0] = 0.25
+        except Exception:
+            pass
+    text(sl, 0.85, 3.15, 11.0, 1.1, "EGC Pulse", 46, INK, True)
+    text(sl, 0.9, 4.2, 11.0, 0.6, [("Social Listening Report", 22, BLUE, True)])
+    text(sl, 0.9, 4.95, 11.5, 0.5, [("Tracked term:  " + (keyword or "all tracked terms") + "      ·      " + rng, 14, MUT, False)])
+    text(sl, 0.9, SH - 0.75, 12.0, 0.4, [("Internal use only. Compliant, official-source listening. Generated " + now_iso()[:16].replace("T", " "), 10, FAINT, False)])
+
+    # Slide 2: overview KPIs
+    sl = new_slide()
+    header(sl, "Overview", "Headline metrics for the selected term and date range.")
+    net = k["netSentiment"]
+    kpis = [("Total mentions", "{:,}".format(k["totalMentions"]), INK),
+            ("Impressions (measured)", _fmt_n(k.get("totalImpressions", 0)), INK),
+            ("Reach (estimated audience)", _fmt_n(k.get("totalReach", 0)), BLUE),
+            ("Engagement", _fmt_n(k.get("totalEngagement", 0)), INK),
+            ("Net sentiment", ("+" if net > 0 else "") + str(net), POS if net > 0 else (NEG if net < 0 else NEU)),
+            ("Visibility score", str(k.get("visibilityScore", 0)) + " / 100", INK)]
+    cw, ch, gx, gy = 3.78, 1.95, 0.34, 0.34
+    x0, y0 = 0.7, 1.75
+    for i, (lab, val, col) in enumerate(kpis):
+        cx = x0 + (i % 3) * (cw + gx)
+        cy = y0 + (i // 3) * (ch + gy)
+        card(sl, cx, cy, cw, ch)
+        text(sl, cx + 0.28, cy + 0.26, cw - 0.5, 0.45, [(lab.upper(), 11, FAINT, True)])
+        text(sl, cx + 0.26, cy + 0.74, cw - 0.45, 1.0, [(val, 34, col, True)])
+    text(sl, 0.7, SH - 0.62, 12.0, 0.4,
+         [("Reach is an estimate of audience reached: measured views to unique viewers, plus an engagement-rate model where views are unavailable. Never follower counts.", 9.5, FAINT, False)])
+
+    # Slide 3: mention volume (line chart)
+    sl = new_slide()
+    header(sl, "Mention volume", "Daily mention count across the selected range.")
+    vol = m.get("volume", [])
+    if vol and sum(p["value"] for p in vol) > 0:
+        cd = CategoryChartData()
+        cd.categories = [ymd(p["t"]) for p in vol]
+        cd.add_series("Mentions", [p["value"] for p in vol])
+        card(sl, 0.7, 1.55, SW - 1.4, 5.35)
+        gf = sl.shapes.add_chart(XL_CHART_TYPE.LINE, Inches(0.95), Inches(1.8), Inches(SW - 1.9), Inches(4.85), cd)
+        chart = gf.chart
+        style_chart(chart)
+        ser = chart.series[0]
+        ser.format.line.color.rgb = BLUE
+        ser.format.line.width = Pt(2.5)
+        ser.smooth = False
+    else:
+        text(sl, 0.95, 3.2, 11.0, 1.0, [("No mention volume in this range.", 16, MUT, False)])
+
+    # Slide 4: sentiment + top platforms
+    sl = new_slide()
+    header(sl, "Sentiment and platform mix")
+    if (s["positive"] + s["neutral"] + s["negative"]) > 0:
+        card(sl, 0.7, 1.55, 5.7, 5.35)
+        text(sl, 0.95, 1.7, 5.0, 0.4, [("SENTIMENT", 11, FAINT, True)])
+        cd = CategoryChartData()
+        cd.categories = ["Positive", "Neutral", "Negative"]
+        cd.add_series("Sentiment", [s["positive"], s["neutral"], s["negative"]])
+        gf = sl.shapes.add_chart(XL_CHART_TYPE.DOUGHNUT, Inches(0.95), Inches(2.1), Inches(5.2), Inches(4.5), cd)
+        chart = gf.chart
+        style_chart(chart, legend=True)
+        pts = chart.plots[0].series[0].points
+        for pt, col in zip(pts, (POS, NEU, NEG)):
+            pt.format.fill.solid(); pt.format.fill.fore_color.rgb = col
+            pt.format.line.color.rgb = PANEL
+    else:
+        text(sl, 0.95, 3.2, 5.0, 0.8, [("No sentiment data in this range.", 14, MUT, False)])
+    plats = m["platforms"][:6]
+    if plats:
+        card(sl, 6.9, 1.55, SW - 7.6, 5.35)
+        text(sl, 7.15, 1.7, 5.0, 0.4, [("MENTIONS BY SOURCE", 11, FAINT, True)])
+        cd = CategoryChartData()
+        cd.categories = [p["platform"] for p in plats]
+        cd.add_series("Mentions", [p["value"] for p in plats])
+        gf = sl.shapes.add_chart(XL_CHART_TYPE.BAR_CLUSTERED, Inches(7.05), Inches(2.05), Inches(SW - 7.75), Inches(4.6), cd)
+        chart = gf.chart
+        style_chart(chart)
+        ser = chart.series[0]
+        ser.format.fill.solid(); ser.format.fill.fore_color.rgb = BLUE
+        try:
+            ser.has_data_labels = True
+            ser.data_labels.position = XL_LABEL_POSITION.OUTSIDE_END
+            ser.data_labels.font.color.rgb = INK
+            ser.data_labels.font.size = Pt(10)
+        except Exception:
+            pass
+    else:
+        text(sl, 7.15, 3.2, 5.0, 0.8, [("No platform data in this range.", 14, MUT, False)])
+
+    # Slide 5: top topics + top authors
+    sl = new_slide()
+    header(sl, "Topics and voices")
+    topics = m["topics"][:8]
+    if topics:
+        card(sl, 0.7, 1.55, 6.0, 5.35)
+        text(sl, 0.95, 1.7, 5.0, 0.4, [("TOP TOPICS", 11, FAINT, True)])
+        cd = CategoryChartData()
+        cd.categories = [t["label"] for t in topics]
+        cd.add_series("Mentions", [t["count"] for t in topics])
+        gf = sl.shapes.add_chart(XL_CHART_TYPE.BAR_CLUSTERED, Inches(0.95), Inches(2.05), Inches(5.5), Inches(4.6), cd)
+        chart = gf.chart
+        style_chart(chart)
+        chart.series[0].format.fill.solid(); chart.series[0].format.fill.fore_color.rgb = BLUE
+    else:
+        text(sl, 0.95, 3.2, 5.0, 0.8, [("No topics extracted in this range.", 14, MUT, False)])
+    authors = m["authors"][:6]
+    card(sl, 7.0, 1.55, SW - 7.7, 5.35)
+    text(sl, 7.25, 1.7, 5.0, 0.4, [("TOP AUTHORS", 11, FAINT, True)])
+    if authors:
+        _table(sl, 7.05, 2.15, SW - 7.75, 4.4, ["Author", "Source", "Mentions"],
+               [[(a["author"] or "unknown")[:28], a["platform"], str(a["mentions"])] for a in authors],
+               BLUE, PANEL, LINE, INK, MUT, FONT)
+    else:
+        text(sl, 7.25, 3.2, 5.0, 0.8, [("No attributed authors in this range.", 14, MUT, False)])
+
+    # Slide 6: top content
+    sl = new_slide()
+    header(sl, "Top content", "Highest-reach mentions in range. Reach shown only where a public metric exists.")
+    tc = m["topContent"][:5]
+    if tc:
+        rows = []
+        for c in tc:
+            metric = _fmt_n(c["reach"]) if c.get("reach") else (_fmt_n(c["engagement"]) + " eng" if c.get("engagement") else "no public metric")
+            rows.append([(c["content"] or "")[:78] or "(untitled)", c["platform"], (c.get("sentiment") or "")[:3], metric])
+        _table(sl, 0.7, 1.7, SW - 1.4, 4.9, ["Content", "Source", "Sent.", "Reach / metric"],
+               rows, BLUE, PANEL, LINE, INK, MUT, FONT, col_widths=[7.4, 1.8, 1.0, 1.7])
+    else:
+        text(sl, 0.95, 3.2, 11.0, 0.8, [("No mentions stored in this range.", 16, MUT, False)])
+
+    # Slide 7: coverage & source truth
+    sl = new_slide()
+    header(sl, "Coverage and source truth")
+    searched = ", ".join("%s (%d)" % (d["platform"], d["count"]) for d in cov.get("platforms_searched", [])) or "none"
+    disc = ", ".join("%s (%d)" % (d["platform"], d["count"]) for d in cov.get("platforms_discussed", [])) or "none"
+    lines = [
+        ("Direct platform data (official APIs / connected accounts): %d" % cov.get("direct", 0), 14, INK, False),
+        ("Open-web references (mention a platform, not its native data): %d" % cov.get("open_web_references", 0), 14, INK, False),
+        ("Manual imports: %d" % cov.get("manual_imports", 0), 14, INK, False),
+        ("Licensed-provider feeds: %d" % cov.get("licensed", 0), 14, INK, False),
+        ("", 8, MUT, False),
+        ("Platforms directly searched:  " + searched, 12, MUT, False),
+        ("Platforms discussed but not directly searched:  " + disc, 12, MUT, False),
+    ]
+    card(sl, 0.7, 1.55, SW - 1.4, 3.7)
+    text(sl, 1.0, 1.8, SW - 2.0, 3.3, lines)
+    text(sl, 0.7, 5.5, SW - 1.4, 1.4,
+         [("Caveat: open-web and News references mention a platform but are not that platform's native data. "
+           "Closed-platform listening requires connected accounts, approved research access, or a licensed provider. "
+           "Reach figures are clearly-labeled estimates; items with no public metric are never assigned fabricated numbers.", 11, FAINT, False)])
+
+    import io as _io
+    buf = _io.BytesIO()
+    prs.save(buf)
+    return buf.getvalue()
+
+
+def _table(sl, l, t, w, h, headers, rows, head_fill, body_fill, edge, ink, mut, font, col_widths=None):
+    """Helper: a dark-themed table for the deck."""
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    n = len(rows) + 1
+    gf = sl.shapes.add_table(n, len(headers), Inches(l), Inches(t), Inches(w), Inches(h))
+    tbl = gf.table
+    tbl.first_row = False
+    tbl.horz_banding = False
+    if col_widths:
+        for i, cwid in enumerate(col_widths):
+            tbl.columns[i].width = Inches(cwid)
+    for j, htext in enumerate(headers):
+        cell = tbl.cell(0, j)
+        cell.fill.solid(); cell.fill.fore_color.rgb = head_fill
+        cell.margin_left = Inches(0.08); cell.margin_top = Inches(0.03); cell.margin_bottom = Inches(0.03)
+        p = cell.text_frame.paragraphs[0]
+        r = p.add_run(); r.text = htext
+        r.font.size = Pt(11); r.font.bold = True; r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF); r.font.name = font
+    for i, row in enumerate(rows):
+        for j, val in enumerate(row):
+            cell = tbl.cell(i + 1, j)
+            cell.fill.solid(); cell.fill.fore_color.rgb = body_fill
+            cell.margin_left = Inches(0.08); cell.margin_top = Inches(0.02); cell.margin_bottom = Inches(0.02)
+            p = cell.text_frame.paragraphs[0]
+            r = p.add_run(); r.text = str(val)
+            r.font.size = Pt(10.5); r.font.color.rgb = ink if j == 0 else mut; r.font.name = font
+    return tbl
+
+
 def internal_use():
     return os.getenv("INTERNAL_USE_ONLY", "true").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -668,6 +1015,10 @@ def run_job(jid):
         start = _clamp_recent(j["start"], j["end"], 30) if j["mode"] == "fast" else j["start"]
         end = j["end"]
         live = pam.get_live_collectors()
+        # Prioritize YouTube and TikTok (open-web discovery leads with the TikTok query)
+        # as the primary sources: collect and analyze them first, then the rest.
+        _PRIO = {"youtube_official_api": 0, "open_web_social_discovery": 1}
+        live.sort(key=lambda s: _PRIO.get(s.key, 5))
         j["skipped_sources"] = _skipped_sources()
         if not live:
             j["status"] = "no_sources"
@@ -938,6 +1289,15 @@ class Handler(BaseHTTPRequestHandler):
                                   "application/json", "pulse_insights.json")
         if u.path == "/api/report":
             return self._send(report_html(one("keyword"), st, en).encode(), ctype="text/html; charset=utf-8")
+        if u.path == "/api/export/report.pptx":
+            try:
+                body = report_pptx(one("keyword"), st, en)
+            except RuntimeError as e:
+                return self._send({"error": str(e)}, 501)
+            except Exception as e:
+                return self._send({"error": "Could not build the deck: %s" % str(e)[:160]}, 500)
+            return self._download(body, "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                  "EGC_Pulse_Report.pptx")
         return self._send({"error": "not found"}, 404)
 
     def do_POST(self):
@@ -950,6 +1310,8 @@ class Handler(BaseHTTPRequestHandler):
             terms = [t for t in terms if t]
             if not terms:
                 return self._send({"error": "Add a tracked term first."}, 400)
+            for t in terms:
+                add_keyword(t)   # collected terms must be tracked so results are selectable + visible
             jid = start_job(terms, st, en, one("mode") or "fast")
             return self._send({"job_id": jid, "status": "queued"})
         if u.path.startswith("/api/jobs/") and u.path.endswith("/cancel"):

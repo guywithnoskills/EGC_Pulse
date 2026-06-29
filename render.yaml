@@ -24,7 +24,7 @@ services:
       - key: SEARCH_API_KEY
         sync: false
       # YouTube Data API v3 (live source). Free Google API key with YouTube Data
-      # API v3 enabled. Keyless sources (Bluesky) run without any of these.
+      # API v3 enabled. With these keys set, YouTube + open-web discovery are the live sources.
       - key: YOUTUBE_API_KEY
         sync: false
       # Secrets — Render prompts for these; never stored in the repo. Leave blank

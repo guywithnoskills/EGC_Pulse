@@ -22,6 +22,7 @@ connected account, approved research access, a licensed provider, or lawful
 manual import (handled elsewhere in the access ladder).
 """
 import hashlib
+import html as _htmllib
 import json
 import os
 import re
@@ -122,6 +123,115 @@ def classify_discovered_url(url):
     return "open_web_social_discovery"
 
 
+# ── result quality: keep only meaningful brand mentions; exclude profiles/dirs ──
+_CONTENT_TOKENS = ("/video/", "/p/", "/reel/", "/reels/", "/tv/", "/posts/", "/post/",
+                   "/status/", "/watch", "/article", "/articles/", "/blog/", "/news/",
+                   "/story", "/stories/", "/comments/", "/permalink", "/photo")
+_LANDING_TOKENS = ("/tag/", "/tags/", "/hashtag/", "/explore", "/discover", "/search",
+                   "/login", "/signup", "/signin", "/directory", "/category/", "/topics/",
+                   "/music/", "/sound/", "/results")
+_PROFILE_PATTS = [
+    r"tiktok\.com/@[^/?#]+/?(\?|$)",
+    r"instagram\.com/[^/?#]+/?(\?|$)",
+    r"facebook\.com/[^/?#]+/?(\?|$)",
+    r"(twitter|x)\.com/[^/?#]+/?(\?|$)",
+    r"linkedin\.com/(in|company|school)/[^/?#]+/?(\?|$)",
+    r"youtube\.com/(@[^/?#]+|channel/[^/?#]+|user/[^/?#]+|c/[^/?#]+)/?(\?|$)",
+    r"reddit\.com/(user|u)/[^/?#]+/?(\?|$)",
+]
+
+
+def is_content_url(url):
+    """True if the URL points at a specific content item (post/video/article/thread),
+    not a profile, home, listing, tag, search, or login page."""
+    u = (url or "").lower().split("#")[0]
+    return bool(u) and any(t in u for t in _CONTENT_TOKENS)
+
+
+def is_profile_url(url):
+    """True for profile/account/home/listing/tag/search/login pages we must NOT store."""
+    u = (url or "").lower().split("#")[0]
+    if not u:
+        return True
+    if is_content_url(u):
+        return False                                  # explicit content path is never a profile
+    if any(t in u for t in _LANDING_TOKENS):
+        return True                                   # tag/hashtag/search/login/discover landing
+    return any(re.search(p, u) for p in _PROFILE_PATTS)  # bare profile / page-home URL
+
+
+def _clean_text(s):
+    """Strip HTML tags and decode entities so provider snippets read as plain text."""
+    s = re.sub(r"<[^>]+>", "", s or "")
+    s = _htmllib.unescape(s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def extract_best_description(result):
+    """Best available display text, in priority order: description > snippet > page
+    description > title plus snippet. Cleaned of HTML. Never returns a URL."""
+    for k in ("description", "snippet", "page_description", "meta_description", "content"):
+        v = _clean_text(result.get(k) or "")
+        if v:
+            return v
+    t = _clean_text(result.get("title") or result.get("name") or "")
+    s = _clean_text(result.get("snippet") or "")
+    return (t + ". " + s).strip() if (t and s) else t
+
+
+def result_has_brand_context(result, term):
+    """True if the tracked term meaningfully appears in the result text or URL (not
+    only as a bare domain match)."""
+    term = (term or "").strip().lower()
+    if not term:
+        return True
+    hay = " ".join([result.get("title") or "", result.get("description") or "",
+                    result.get("snippet") or "", result.get("url") or ""]).lower()
+    if term in hay:
+        return True
+    words = [w for w in re.split(r"[^a-z0-9]+", term) if len(w) > 2]
+    if not words:
+        return term in hay
+    return sum(1 for w in words if w in hay) >= max(1, (len(words) + 1) // 2)
+
+
+def classify_result_type(url, title="", description=""):
+    """Coarse result type for honest feed badges and filtering."""
+    plat = extract_platform_from_url(url)
+    u = (url or "").lower()
+    if plat == "tiktok":
+        return "tiktok_video_reference" if "/video/" in u else "rejected_profile"
+    if plat == "instagram":
+        return "instagram_post_reference" if any(t in u for t in ("/p/", "/reel/", "/tv/")) else "rejected_profile"
+    if plat == "facebook":
+        return "facebook_post_reference" if any(t in u for t in ("/posts/", "/permalink", "/photo", "/videos/", "/story")) else "rejected_profile"
+    if "reddit.com" in u and "/comments/" in u:
+        return "discussion"
+    if any(t in u for t in ("/article", "/articles/", "/news", "news.", "/story", "/blog", "/press")):
+        return "news_article"
+    return "web_article"
+
+
+def reject_low_value_result(result, term):
+    """Return a rejection reason ('rejected_profile' | 'rejected_low_context'), or
+    None to keep. Known TikTok video URLs are kept (oEmbed enrichment supplies text)."""
+    url = (result.get("url") or result.get("link") or "").strip()
+    if not url:
+        return "rejected_low_context"
+    if is_profile_url(url):
+        return "rejected_profile"
+    if classify_discovered_url(url) == "tiktok_oembed_known_url":
+        return None                                   # known TikTok video, enriched via oEmbed
+    if classify_result_type(url, result.get("title") or "", "") == "rejected_profile":
+        return "rejected_profile"                     # closed-platform non-post (shop/content/feed pages)
+    title = (result.get("title") or "").strip()
+    if len((title + " " + extract_best_description(result)).strip()) < 12:
+        return "rejected_low_context"                 # no usable text to display
+    if not result_has_brand_context(result, term):
+        return "rejected_low_context"                 # term only in domain / navigation
+    return None
+
+
 # ── 3. open web query builder (controlled, not spammy) ───────────────────────
 def build_open_web_queries(term, hashtags=None, platforms=None):
     """A small, precise set of discovery queries for one tracked term. These are
@@ -194,6 +304,7 @@ def discovery_status():
         "can_collect": can,
         "message": msg,
         "last_error": _LAST_SEARCH_ERROR or None,
+        "last_diag": _LAST_DISCOVERY_DIAG or {},
     }
 
 
@@ -243,6 +354,7 @@ def _parse_search_results(data):
 
 
 _LAST_SEARCH_ERROR = ""  # last provider error (e.g. quota), surfaced to the UI/sweep
+_LAST_DISCOVERY_DIAG = {}  # dev-only counts from the last open-web sweep (never contains keys)
 
 
 def search_provider_query(query, count=8, start=None, end=None):
@@ -321,13 +433,15 @@ def normalize_open_web_reference(result, term=None):
     with a source_mode. source_truth.normalize_mention_source then attaches the
     honest coverage labels (open-web reference, not platform-native data)."""
     url = result.get("url") or result.get("link") or ""
-    title = result.get("title") or result.get("name") or ""
-    snippet = result.get("snippet") or result.get("description") or ""
-    content = (title + " " + snippet).strip() or url
+    title = _clean_text(result.get("title") or result.get("name") or "")
+    description = extract_best_description(result)
+    content = title or description or _domain(url) or url   # headline; description carries the body
     return {"platform": "open_web", "platform_post_id": url or _short_id(title),
-            "author": _domain(url), "content": content, "url": url,
+            "author": _domain(url), "content": content, "description": description, "url": url,
             "posted_at": result.get("date") or result.get("posted_at"),
-            "engagement": 0, "source_mode": classify_discovered_url(url)}
+            "engagement": 0, "hashtags": extract_hashtags_from_text(title + " " + description),
+            "source_mode": classify_discovered_url(url),
+            "result_type": classify_result_type(url, title, description)}
 
 
 def enrich_known_urls(urls, term=None):
@@ -353,8 +467,9 @@ def enrich_known_urls(urls, term=None):
         content = ((e.get("title") or "TikTok video") + extra
                    + ((" " + " ".join(e["hashtags"])) if e.get("hashtags") else "")).strip()
         records.append({"platform": "open_web", "platform_post_id": url, "author": e.get("author_name"),
-                        "content": content, "url": url, "posted_at": None, "engagement": 0,
-                        "source_mode": "tiktok_oembed_known_url"})
+                        "content": content, "description": (e.get("title") or content), "url": url,
+                        "posted_at": None, "engagement": 0, "hashtags": e.get("hashtags") or [],
+                        "source_mode": "tiktok_oembed_known_url", "result_type": "tiktok_video_reference"})
         accepted.append(url)
     return {"records": records, "accepted": accepted, "rejected": rejected}
 
@@ -371,7 +486,7 @@ def source_truth_for_discovery(result):
                 "display_platform": "TikTok URL", "discussed_platforms": discussed or ["TikTok"],
                 "direct_platform_data": False, "coverage_type": "known_url_enrichment",
                 "coverage_note": "TikTok oEmbed enriches a known public video URL. It does not perform TikTok keyword search."}
-    return {"source_mode": mode, "searched_platform": "open web", "display_platform": "Open Web / News",
+    return {"source_mode": mode, "searched_platform": "open web", "display_platform": "News",
             "discussed_platforms": discussed, "direct_platform_data": False,
             "coverage_type": "open_web_reference",
             "coverage_note": "This is an open web result referencing a platform. It is not direct platform data."}
@@ -382,13 +497,14 @@ def collect_open_web_discovery(term, start=None, end=None, limit=24, hashtags=No
     """Run controlled open-web discovery queries via the configured search
     provider. Enriches discovered TikTok video URLs via official oEmbed. Returns
     [] when no search provider is configured (the source stays gated)."""
-    global _LAST_SEARCH_ERROR
+    global _LAST_SEARCH_ERROR, _LAST_DISCOVERY_DIAG
     if not search_provider_configured():
         return []
     queries = build_open_web_queries(term, hashtags)
     if not queries:
         return []
     _LAST_SEARCH_ERROR = ""
+    diag = {"provider_results": 0, "rejected_profile": 0, "rejected_low_context": 0, "accepted": 0}
     per = max(3, limit // max(len(queries), 1))
     seen, out = set(), []
     for q in queries:
@@ -398,23 +514,38 @@ def collect_open_web_discovery(term, start=None, end=None, limit=24, hashtags=No
         # Results are stored with the collection date and filtered by range at
         # display time, so date scoping still applies to what the user sees.
         for r in search_provider_query(q, count=per):
+            diag["provider_results"] += 1
             url = r.get("url") or ""
             if not url or url in seen:
                 continue
             seen.add(url)
+            reason = reject_low_value_result(r, term)   # drop profiles / tag-pages / empty / no-context
+            if reason:
+                diag[reason] = diag.get(reason, 0) + 1
+                continue
             rec = normalize_open_web_reference(r, term)
             if enrich_oembed and rec["source_mode"] == "tiktok_oembed_known_url":
                 e = enrich_known_tiktok_url_oembed(url)
                 if e:
                     extra = (" by " + e["author_name"]) if e.get("author_name") else ""
-                    rec["content"] = ((e.get("title") or rec["content"]) + extra
-                                      + (" " + " ".join(e["hashtags"]) if e.get("hashtags") else "")).strip()
+                    rec["content"] = ((e.get("title") or rec["content"]) + extra).strip()
+                    rec["description"] = e.get("title") or rec.get("description") or ""
                     rec["author"] = e.get("author_name") or rec["author"]
+                    if e.get("hashtags"):
+                        rec["hashtags"] = e["hashtags"]
+                    rec["result_type"] = "tiktok_video_reference"
+                elif len((rec.get("content") or "").strip()) < 12:
+                    diag["rejected_low_context"] += 1     # could not enrich and no usable text
+                    continue
                 else:
-                    rec["source_mode"] = "open_web_social_discovery"  # could not enrich; open-web reference to TikTok
+                    rec["source_mode"] = "open_web_social_discovery"
+                    rec["result_type"] = "web_article"
+            diag["accepted"] += 1
             out.append(rec)
             if len(out) >= limit:
+                _LAST_DISCOVERY_DIAG = diag
                 return out
+    _LAST_DISCOVERY_DIAG = diag
     if not out and _LAST_SEARCH_ERROR:
         raise RuntimeError(_LAST_SEARCH_ERROR)
     return out

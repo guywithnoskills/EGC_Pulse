@@ -9,7 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&family=Noto+Serif:wght@600;700&display=swap" rel="stylesheet">
 <style>
   :root{
-    /* EGC Pulse dark theme — ~80% dark grey, EGC-inspired blue accent */
+    /* EGC Pulse dark theme: ~80% dark grey, EGC-inspired blue accent */
     --bg:#191a1d; --panel:#212329; --panel2:#2b2e36; --surface:#2a2d35; --rail:#131418; --rail2:#20222a;
     --ink:#eef0f3; --ink2:#c2c6cd; --muted:#9398a1; --faint:#6d727b;
     --line:#2b2e35; --line2:#34373f; --line3:#454953; --charcoal:#0f1013;
@@ -158,6 +158,8 @@
   .ph .hint{font-size:11px;color:var(--faint)}
   .chart svg{display:block;width:100%;overflow:visible}
   .chart .cap{font-size:11px;color:var(--faint);margin-top:8px}
+  .vol-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;height:150px;text-align:center;border:1px dashed var(--line2);border-radius:11px;color:var(--muted)}
+  .vol-empty b{font-size:13px;color:var(--ink2);font-weight:700} .vol-empty span{font-size:11.5px;color:var(--faint)}
 
   /* sentiment bar */
   .sentbar{display:flex;height:11px;border-radius:6px;overflow:hidden;border:1px solid var(--line)}
@@ -202,6 +204,12 @@
   .mrow .body{min-width:0}
   .mrow .mt{font-size:13px;color:var(--ink);line-height:1.5;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
   .mrow .mt:hover{color:var(--brand)}
+  .mrow .m-desc{font-size:12px;color:var(--muted);line-height:1.5;margin-top:5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .rtag{font-size:9px;letter-spacing:.4px;text-transform:uppercase;font-weight:700;color:var(--ink2);background:var(--panel2);border:1px solid var(--line2);border-radius:6px;padding:1px 7px}
+  .rtag.rt-instagram_post_reference{background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888);color:#fff;border-color:transparent}
+  .rtag.rt-facebook_post_reference{background:#1877F2;color:#fff;border-color:transparent}
+  .rtag.rt-tiktok_video_reference{background:#000;color:#fff;border-color:#2b2e35}
+  .dsrc{color:var(--faint);font-style:italic}
   .mrow .meta{display:flex;flex-wrap:wrap;align-items:center;gap:7px;font-size:11px;color:var(--muted);margin-top:7px}
   .mrow .meta .sep{color:var(--line3)}
   .sent{font-size:10px;text-transform:capitalize;border:1px solid var(--line2);border-radius:10px;padding:1px 8px;color:var(--ink2)}
@@ -209,6 +217,7 @@
   .mpill{font-size:9.5px;letter-spacing:.3px;border:1px dashed var(--line3);border-radius:10px;padding:1px 8px;color:var(--muted);white-space:nowrap}
   .mrow .nums{text-align:right;display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--muted)}
   .mrow .nums b{font-size:14px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
+  .nometric{font-size:10.5px;color:var(--faint);font-style:italic}
   .ext{color:var(--faint);font-size:11px}
 
   .empty{padding:46px 18px;text-align:center;color:var(--muted);font-size:13px;line-height:1.7}
@@ -332,6 +341,7 @@
               <label>Start<input type="date" class="inp" id="start" /></label>
               <label>End<input type="date" class="inp" id="end" /></label>
             </div>
+            <button class="btn" id="dpApply" style="margin-top:12px;width:100%">Apply &amp; collect</button>
           </div>
         </div>
         <button class="btn" id="collectBtn">Collect</button>
@@ -343,6 +353,7 @@
           <button class="iconbtn" id="navExport"><svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M5 21h14"/></svg>Export</button>
           <div class="menu" id="exportMenu">
             <div class="scope" style="border:none;margin:0;padding-bottom:6px">Download current selection</div>
+            <a class="exp-pptx" download>PowerPoint report <span class="ar">PPTX</span></a>
             <a class="exp-csv" download>Mentions CSV <span class="ar">CSV</span></a>
             <a class="exp-json" download>Insights JSON <span class="ar">JSON</span></a>
             <a class="exp-report" target="_blank">Printable report <span class="ar">open</span></a>
@@ -457,15 +468,21 @@ const cap=s=>(s||'').charAt(0).toUpperCase()+(s||'').slice(1);
 const todayISO=()=>new Date().toISOString().slice(0,10);
 const shiftISO=d=>{const t=new Date();t.setDate(t.getDate()-d);return t.toISOString().slice(0,10);};
 function fmtTime(t){try{return t?new Date(t).toLocaleString():'not checked';}catch(e){return 'not checked';}}
+function fmtDate(t){ // visible dates everywhere are YY/MM/DD (e.g. 26/06/21)
+  if(!t)return '';const s=String(t);const mm=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  let y,m,d;if(mm){y=+mm[1];m=+mm[2];d=+mm[3];}else{const dt=new Date(s);if(isNaN(dt))return '';y=dt.getFullYear();m=dt.getMonth()+1;d=dt.getDate();}
+  const p=n=>String(n).padStart(2,'0');return p(y%100)+'/'+p(m)+'/'+p(d);}
+function fmtRange(s,e){return (fmtDate(s)||s||'')+' to '+(fmtDate(e)||e||'');}  // no em dash
 function parseList(v){if(Array.isArray(v))return v;try{return JSON.parse(v||'[]')}catch(e){return [];}}
 
-const PLAT_NAMES={open_web:'Open web discovery',youtube:'YouTube',bluesky:'Bluesky',reddit:'Reddit',x:'X / Twitter',meta:'Meta',instagram:'Instagram',facebook:'Facebook',tiktok:'TikTok',licensed:'Licensed provider'};
-const PLAT_ORDER=['youtube','bluesky','open_web','reddit','x','meta','instagram','facebook','tiktok','licensed'];
+const PLAT_NAMES={open_web:'Open web discovery',youtube:'YouTube',reddit:'Reddit',x:'X / Twitter',meta:'Meta',instagram:'Instagram',facebook:'Facebook',tiktok:'TikTok',licensed:'Licensed provider'};
+const PLAT_ORDER=['youtube','open_web','reddit','x','meta','instagram','facebook','tiktok','licensed'];
 const PLAT_DISP=PLAT_NAMES;
-const SRC_ICON={open_web:'OW',youtube:'YT',bluesky:'BS',reddit:'RD',x:'X',meta:'MT',instagram:'IG',facebook:'FB',tiktok:'TT',licensed:'LP'};
-const SRC_PATH={open_web:'Brave Search API',youtube:'YouTube Data API v3',bluesky:'AT Protocol public API',reddit:'Official Data API',x:'API v2',meta:'Graph API',instagram:'Graph API',facebook:'Graph API',tiktok:'Research API',licensed:'Licensed feed'};
-const SRC_DESC={open_web:'Public web pages referencing the brand, via official search API.',youtube:'Public video search with views (reach) and likes plus comments (engagement).',bluesky:'Public posts from the open AT Protocol network. Keyless.',reddit:'Public posts from the official Reddit Data API.',x:'Public posts via the official X API v2.',meta:'Owned-account analytics and approved research access.',instagram:'Owned-account analytics via connected accounts.',facebook:'Owned-account analytics via connected Pages.',tiktok:'Approved research or connected-account access.',licensed:'Public listening on closed platforms via a licensed reseller.'};
+const SRC_ICON={open_web:'OW',youtube:'YT',reddit:'RD',x:'X',meta:'MT',instagram:'IG',facebook:'FB',tiktok:'TT',licensed:'LP'};
+const SRC_PATH={open_web:'Brave Search API',youtube:'YouTube Data API v3',reddit:'Official Data API',x:'API v2',meta:'Graph API',instagram:'Graph API',facebook:'Graph API',tiktok:'Research API',licensed:'Licensed feed'};
+const SRC_DESC={open_web:'Public web pages referencing the brand, via official search API.',youtube:'Public video search with views (reach) and likes plus comments (engagement).',reddit:'Public posts from the official Reddit Data API.',x:'Public posts via the official X API v2.',meta:'Owned-account analytics and approved research access.',instagram:'Owned-account analytics via connected accounts.',facebook:'Owned-account analytics via connected Pages.',tiktok:'Approved research or connected-account access.',licensed:'Public listening on closed platforms via a licensed reseller.'};
 const COV_BADGE={direct_official_api:'Direct API',direct_connected_account:'Connected account',direct_research_api:'Research API',direct_transparency_api:'Ads only',direct_licensed_provider:'Licensed feed',open_web_reference:'Open-web reference',open_network_public:'Open network',historical_open_web:'Historical open web',limited_metadata:'Limited metadata',unavailable_compliantly:'Unavailable',known_url_enrichment:'oEmbed (known URL)'};
+const RESULT_TYPE={news_article:'News article',web_article:'Web article',discussion:'Discussion',instagram_post_reference:'Instagram post',facebook_post_reference:'Facebook post',tiktok_video_reference:'TikTok video',known_url_enrichment:'Known URL',manual_import:'Manual import'};
 
 /* ---------------- state ---------------- */
 const state={term:'',start:shiftISO(90),end:todayISO(),view:'sources'};
@@ -495,7 +512,7 @@ let _job=null,_poll=null;
 function validate(){
   const bad=state.start&&state.end&&state.end<state.start;
   $('dateErr').style.display=bad?'block':'none';
-  if(bad)$('dateErr').textContent='End date ('+state.end+') is before start date ('+state.start+'). Adjust the range to collect.';
+  if(bad)$('dateErr').textContent='End date ('+fmtDate(state.end)+') is before start date ('+fmtDate(state.start)+'). Adjust the range to collect.';
   const lock=bad||!!_job;
   $('collectBtn').disabled=lock;$('addBtn').disabled=lock;
   return !bad;
@@ -629,7 +646,10 @@ function renderSentiment(s){
 }
 function renderVolume(pts){
   const W=640,H=180,padL=30,padR=14,padT=20,padB=26,host=$('volume');
-  if(!pts||!pts.length){host.innerHTML='<div class="tiny">No volume in this range.</div>';$('volCap').textContent='';$('volHint').textContent='';return;}
+  const total=(pts||[]).reduce((a,p)=>a+(Number(p.value)||0),0);
+  if(!pts||!pts.length||total===0){
+    host.innerHTML='<div class="vol-empty"><b>No mention volume in this range yet</b><span>Collect a tracked term or widen the dates to populate the timeline.</span></div>';
+    $('volCap').textContent='';$('volHint').textContent='';return;}
   const max=Math.max(...pts.map(p=>p.value),1),n=pts.length;
   const sx=(W-padL-padR)/Math.max(n-1,1);
   const x=i=>padL+i*sx,y=v=>H-padB-(v/max)*(H-padT-padB);
@@ -641,7 +661,7 @@ function renderVolume(pts){
     host.innerHTML='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto">'+grid+
       '<circle cx="'+cx+'" cy="'+cy.toFixed(1)+'" r="4" fill="var(--brand)"/>'+
       '<text x="'+cx+'" y="'+(cy-9).toFixed(1)+'" text-anchor="middle" fill="var(--ink)" font-size="11" font-weight="700">'+pts[0].value+'</text>'+
-      '<text x="'+cx+'" y="'+(H-8)+'" text-anchor="middle" fill="var(--faint)" font-size="10">'+pts[0].t+'</text></svg>';
+      '<text x="'+cx+'" y="'+(H-8)+'" text-anchor="middle" fill="var(--faint)" font-size="10">'+fmtDate(pts[0].t)+'</text></svg>';
     $('volCap').textContent='';$('volHint').textContent=pts[0].value+' mention'+(pts[0].value===1?'':'s');return;}
   const line=pts.map((p,i)=>(i?'L':'M')+x(i).toFixed(1)+','+y(p.value).toFixed(1)).join(' ');
   const area=line+' L'+x(n-1).toFixed(1)+','+(H-padB)+' L'+x(0).toFixed(1)+','+(H-padB)+' Z';
@@ -650,8 +670,8 @@ function renderVolume(pts){
   pts.forEach((p,i)=>{const show=few||i===peak||i===0||i===n-1;
     if(show&&p.value>0){dots+='<circle cx="'+x(i).toFixed(1)+'" cy="'+y(p.value).toFixed(1)+'" r="2.6" fill="var(--brand)"/>';
       if(few||i===peak)dots+='<text x="'+x(i).toFixed(1)+'" y="'+(y(p.value)-8).toFixed(1)+'" text-anchor="middle" fill="var(--ink2)" font-size="10" font-weight="700">'+p.value+'</text>';}});
-  const xlab='<text x="'+padL+'" y="'+(H-8)+'" text-anchor="start" fill="var(--faint)" font-size="10">'+pts[0].t+'</text>'+
-    '<text x="'+(W-padR)+'" y="'+(H-8)+'" text-anchor="end" fill="var(--faint)" font-size="10">'+pts[n-1].t+'</text>';
+  const xlab='<text x="'+padL+'" y="'+(H-8)+'" text-anchor="start" fill="var(--faint)" font-size="10">'+fmtDate(pts[0].t)+'</text>'+
+    '<text x="'+(W-padR)+'" y="'+(H-8)+'" text-anchor="end" fill="var(--faint)" font-size="10">'+fmtDate(pts[n-1].t)+'</text>';
   host.innerHTML='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto">'+grid+
     '<path d="'+area+'" fill="var(--brand)" fill-opacity="0.12"/><path d="'+line+'" fill="none" stroke="var(--brand)" stroke-width="2"/>'+dots+xlab+'</svg>';
   $('volCap').textContent='';$('volHint').textContent='peak '+fmt(max)+'/day';
@@ -705,27 +725,40 @@ function applyFeed(){
   rows.sort(sorters[filters.sort]||sorters.newest);
   return rows;
 }
+function coverageLine(m){
+  const ct=m.platform_coverage_type||'';
+  if(ct==='known_url_enrichment')return 'TikTok URL · oEmbed enrichment · Known URL only';
+  if(ct==='open_web_reference'||ct==='open_web_social_discovery'){
+    const disc=parseList(m.discussed_platforms);
+    const closed=disc.find(p=>['TikTok','Instagram','Facebook'].indexOf(p)>=0);
+    return closed?('Open Web · Mentions '+closed+' · Not '+closed+' platform data'):'Open Web';
+  }
+  return COV_BADGE[ct]||'';
+}
 function feedHTML(rows){
   if(!rows.length)return '<div class="empty"><div class="eh">No mentions in this view</div>'+
     'Add a tracked term in the bar above and press <b>Collect</b>, or widen the date range. '+
-    'Live sources: <span class="linklike" id="goSources">YouTube, Bluesky, open web</span>.</div>';
+    'Live sources: <span class="linklike" id="goSources">YouTube, open web</span>.</div>';
   return '<div class="mhead"><span>Source</span><span>Mention</span><span class="r">Engagement</span></div>'+rows.map(m=>{
     const disp=m.display_platform||cap(m.platform);
-    const badge=COV_BADGE[m.platform_coverage_type]||'';
     const direct=!!m.direct_platform_data;
     const eng=Number(m.engagement)||0,reach=Number(m.reach)||0;
-    const disc=direct?[]:parseList(m.discussed_platforms).filter(p=>!String(disp).toLowerCase().includes(String(p).toLowerCase()));
-    const pills=disc.slice(0,2).map(p=>'<span class="mpill">mentions '+esc(p)+'</span>').join('');
+    const cov=coverageLine(m);
+    const rtl=RESULT_TYPE[m.result_type]||'';
+    const dstr=fmtDate(m.posted_at||m.posted_date||m.ingested_at);
+    const collected=(String(m.platform)==='open_web');  // open-web results have no real publish date
+    const desc=(m.description&&m.description.trim()&&m.description.trim()!==(m.content||'').trim())?('<div class="m-desc">'+esc(m.description)+'</div>'):'';
     const meta=[];
-    if(badge)meta.push('<span class="cov"><i class="cd '+(direct?'on':'')+'"></i>'+esc(badge)+'</span>');
+    if(cov)meta.push('<span class="cov"><i class="cd '+(direct?'on':'')+'"></i>'+esc(cov)+'</span>');
+    if(rtl)meta.push('<span class="rtag rt-'+esc(m.result_type||'')+'">'+esc(rtl)+'</span>');
     if(m.keyword)meta.push('<span>'+esc(m.keyword)+'</span>');
-    meta.push('<span>'+(m.posted_at?new Date(m.posted_at).toLocaleDateString():'')+'</span>');
+    if(dstr)meta.push('<span>'+dstr+(collected?'<span class="dsrc"> collected</span>':'')+'</span>');
     if(m.sentiment)meta.push('<span class="sent '+esc(m.sentiment)+'">'+esc(m.sentiment)+'</span>');
-    const metaH=meta.join('<span class="sep">·</span>')+(pills?(' '+pills):'');
-    const nums=(eng||reach)?('<div class="nums">'+(eng?'<span><b>'+fmt(eng)+'</b> eng</span>':'')+(reach?'<span>'+fmt(reach)+' reach</span>':'')+'</div>'):'<div class="nums"></div>';
+    const metaH=meta.join('<span class="sep">·</span>');
+    const nums=(eng||reach)?('<div class="nums">'+(eng?'<span><b>'+fmt(eng)+'</b> eng</span>':'')+(reach?'<span>'+fmt(reach)+' reach</span>':'')+'</div>'):'<div class="nums"><span class="nometric">no public metric</span></div>';
     return '<div class="mrow"><div class="src-cell"><span class="src-tag" title="'+esc(disp)+'">'+esc(disp)+'</span></div>'+
       '<div class="body"><a class="mt" href="'+esc(m.url||'#')+'" target="_blank" rel="noopener">'+esc(m.content||m.author||'(untitled)')+'</a>'+
-      '<div class="meta">'+metaH+(m.author?'<span class="sep">·</span><span>'+esc(m.author)+'</span>':'')+'</div></div>'+nums+'</div>';
+      desc+'<div class="meta">'+metaH+(m.author?'<span class="sep">·</span><span>'+esc(m.author)+'</span>':'')+'</div></div>'+nums+'</div>';
   }).join('');
 }
 function renderFeed(){
@@ -747,10 +780,11 @@ $('fSort').onchange=()=>{filters.sort=$('fSort').value;renderFeed();};
 
 function updateExports(){
   const q=qstr();
+  document.querySelectorAll('.exp-pptx').forEach(a=>a.href='/api/export/report.pptx?'+q);
   document.querySelectorAll('.exp-csv').forEach(a=>a.href='/api/export/mentions.csv?'+q);
   document.querySelectorAll('.exp-json').forEach(a=>a.href='/api/export/insights.json?'+q);
   document.querySelectorAll('.exp-report').forEach(a=>a.href='/api/report?'+q);
-  $('menuScope').textContent='Scope: '+(state.term||'all terms')+', '+state.start+' to '+state.end;
+  $('menuScope').textContent='Scope: '+(state.term||'all terms')+', '+fmtRange(state.start,state.end);
 }
 
 /* ---------------- refresh ---------------- */
@@ -772,7 +806,7 @@ async function refresh(){
     renderTopContent(m.topContent);
     populateSourceFilter(m.platforms);
     if(platformsCache.length)renderSources(platformsCache);
-    lastFeed=trackedN===0?[]:await (await api('/api/mentions?limit=200&'+qstr())).json();
+    lastFeed=await (await api('/api/mentions?limit=200&'+qstr())).json();  // always show stored results in scope
     renderFeed();
     setStatus((m.kpis.totalMentions||0).toLocaleString()+' mention'+(m.kpis.totalMentions===1?'':'s')+' · '+(state.term||'all terms'));
   }catch(e){setStatus('API offline');}
@@ -791,7 +825,7 @@ function detectPreset(){
 }
 function updateDateLabel(preset){
   preset=preset!=null?preset:detectPreset();
-  $('dateLabel').textContent=(preset&&PRESET_LABELS[preset])?PRESET_LABELS[preset]:(state.start+' to '+state.end);
+  $('dateLabel').textContent=(preset&&PRESET_LABELS[preset])?PRESET_LABELS[preset]:fmtRange(state.start,state.end);
   $('dpPresets').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.getAttribute('data-p')===preset));
 }
 function applyPreset(v){
@@ -805,8 +839,15 @@ function applyPreset(v){
 function closeDatePanel(){$('datePanel').classList.remove('open');}
 $('dateBtn').onclick=e=>{e.stopPropagation();$('datePanel').classList.toggle('open');};
 $('dpPresets').querySelectorAll('button').forEach(b=>b.onclick=()=>{applyPreset(b.getAttribute('data-p'));closeDatePanel();});
-$('start').onchange=()=>{state.start=$('start').value;updateDateLabel('');refresh();};
-$('end').onchange=()=>{state.end=$('end').value;updateDateLabel('');refresh();};
+$('start').onchange=()=>{state.start=$('start').value;updateDateLabel('');};
+$('end').onchange=()=>{state.end=$('end').value;updateDateLabel('');};
+$('dpApply').onclick=()=>{ // apply the chosen range, then collect for it
+  if($('start').value)state.start=$('start').value;
+  if($('end').value)state.end=$('end').value;
+  if(!validate())return;
+  saveState();updateDateLabel('');closeDatePanel();
+  $('collectBtn').click();
+};
 document.addEventListener('click',e=>{if(!$('datePanel').contains(e.target)&&!$('dateBtn').contains(e.target))closeDatePanel();});
 $('addBtn').onclick=async()=>{
   const q=$('q').value.trim();if(!q)return;if(!validate())return;
@@ -897,7 +938,7 @@ async function openCoverage(){
     const disc=(c.platforms_discussed||[]).map(d=>esc(d.platform)+' ('+d.count+')').join(', ')||'none';
     const gated=(led.gated||[]).map(g=>'<li>'+esc(g.platform)+': '+esc(g.status)+'</li>').join('')||'<li>none</li>';
     const r=led.range||{};
-    ledHtml='<div class="ledger"><div class="gh">Coverage ledger, '+esc(r.start||'earliest')+' to '+esc(r.end||'now')+'</div>'+
+    ledHtml='<div class="ledger"><div class="gh">Coverage ledger, '+(r.start?fmtDate(r.start):'earliest')+' to '+(r.end?fmtDate(r.end):'now')+'</div>'+
       '<div class="row">Direct platform data: <b>'+(c.direct||0)+'</b>, open-web references: <b>'+(c.open_web_references||0)+'</b>, licensed: <b>'+(c.licensed||0)+'</b></div>'+
       '<div class="sub">Directly searched: '+searched+'<br>Discussed but not directly searched: '+disc+'</div>'+
       '<div class="sub" style="margin-top:8px">Gated, not searched:<ul>'+gated+'</ul></div></div>';
