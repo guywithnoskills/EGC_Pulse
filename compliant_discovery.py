@@ -124,9 +124,12 @@ def classify_discovered_url(url):
 
 
 # ── result quality: keep only meaningful brand mentions; exclude profiles/dirs ──
-_CONTENT_TOKENS = ("/video/", "/p/", "/reel/", "/reels/", "/tv/", "/posts/", "/post/",
+# A single content item (post/video/article/thread). Note: singular forms only
+# (/reel/ not /reels/, /photo.php or /photo/ not /photos) so listing/tab pages are
+# NOT mistaken for content.
+_CONTENT_TOKENS = ("/video/", "/p/", "/reel/", "/tv/", "/posts/", "/post/",
                    "/status/", "/watch", "/article", "/articles/", "/blog/", "/news/",
-                   "/story", "/stories/", "/comments/", "/permalink", "/photo")
+                   "/story", "/stories/", "/comments/", "/permalink", "/photo.php", "/photo/")
 _LANDING_TOKENS = ("/tag/", "/tags/", "/hashtag/", "/explore", "/discover", "/search",
                    "/login", "/signup", "/signin", "/directory", "/category/", "/topics/",
                    "/music/", "/sound/", "/results")
@@ -135,7 +138,10 @@ _PROFILE_PATTS = [
     r"instagram\.com/[^/?#]+/?(\?|$)",
     r"facebook\.com/[^/?#]+/?(\?|$)",
     r"(twitter|x)\.com/[^/?#]+/?(\?|$)",
+    # X / LinkedIn profile sub-tabs (not single posts) are still profile pages.
+    r"(twitter|x)\.com/[^/?#]+/(with_replies|media|likes|following|followers)/?(\?|$)",
     r"linkedin\.com/(in|company|school)/[^/?#]+/?(\?|$)",
+    r"linkedin\.com/(in|company|school)/[^/?#]+/(about|posts|people|jobs|life)/?(\?|$)",
     r"youtube\.com/(@[^/?#]+|channel/[^/?#]+|user/[^/?#]+|c/[^/?#]+)/?(\?|$)",
     r"reddit\.com/(user|u)/[^/?#]+/?(\?|$)",
 ]
@@ -185,8 +191,12 @@ def result_has_brand_context(result, term):
     term = (term or "").strip().lower()
     if not term:
         return True
+    # Drop the scheme+host from the URL so a term that appears ONLY in the registered
+    # domain (e.g. "nike" in nike.com) does not count as brand context; the path and
+    # query still count (term-in-slug is meaningful).
+    url_path = re.sub(r"^https?://[^/]+", "", (result.get("url") or ""))
     hay = " ".join([result.get("title") or "", result.get("description") or "",
-                    result.get("snippet") or "", result.get("url") or ""]).lower()
+                    result.get("snippet") or "", url_path]).lower()
     if term in hay:
         return True
     words = [w for w in re.split(r"[^a-z0-9]+", term) if len(w) > 2]
@@ -204,7 +214,11 @@ def classify_result_type(url, title="", description=""):
     if plat == "instagram":
         return "instagram_post_reference" if any(t in u for t in ("/p/", "/reel/", "/tv/")) else "rejected_profile"
     if plat == "facebook":
-        return "facebook_post_reference" if any(t in u for t in ("/posts/", "/permalink", "/photo", "/videos/", "/story")) else "rejected_profile"
+        # Require a real content marker (post/permalink/story id, single photo, video,
+        # or Watch). Bare tabs like /photos, /about, /videos are listing/profile pages.
+        fb_post = ("/posts/", "/permalink", "story_fbid=", "/story.php", "/photo.php",
+                   "/photo/", "/videos/", "/watch", "fb.watch")
+        return "facebook_post_reference" if any(t in u for t in fb_post) else "rejected_profile"
     if "reddit.com" in u and "/comments/" in u:
         return "discussion"
     if any(t in u for t in ("/article", "/articles/", "/news", "news.", "/story", "/blog", "/press")):
@@ -436,9 +450,12 @@ def normalize_open_web_reference(result, term=None):
     title = _clean_text(result.get("title") or result.get("name") or "")
     description = extract_best_description(result)
     content = title or description or _domain(url) or url   # headline; description carries the body
+    # Discovery never requests freshness, and a search provider's crawl/index date is
+    # not a reliable POST date. Leave posted_at empty so ingest dates the row by
+    # collected_at; the feed then honestly marks the date source as "collected".
     return {"platform": "open_web", "platform_post_id": url or _short_id(title),
             "author": _domain(url), "content": content, "description": description, "url": url,
-            "posted_at": result.get("date") or result.get("posted_at"),
+            "posted_at": None,
             "engagement": 0, "hashtags": extract_hashtags_from_text(title + " " + description),
             "source_mode": classify_discovered_url(url),
             "result_type": classify_result_type(url, title, description)}

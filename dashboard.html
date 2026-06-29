@@ -43,6 +43,64 @@
   .rail .spacer{flex:1}
   .rail .railfoot{border-top:1px solid #2c2d31;padding-top:12px;display:flex;flex-direction:column;gap:3px}
   .rail .internal{font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;color:#7e8088;padding:8px 11px 2px}
+  /* ---------- projects panel ---------- */
+  .projwrap{margin-top:18px;border-top:1px solid #2c2d31;padding-top:14px;display:flex;flex-direction:column;min-height:0;flex:1 1 auto}
+  .proj-h{display:flex;align-items:center;justify-content:space-between;padding:0 8px 8px;font-size:9.5px;letter-spacing:.6px;text-transform:uppercase;color:#7e8088;font-weight:700}
+  .proj-add{width:22px;height:22px;border-radius:6px;border:1px solid #34363d;background:var(--rail2);color:#c5c7cd;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
+  .proj-add svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2}
+  .proj-add:hover{background:var(--brand);border-color:var(--brand);color:#fff}
+  .proj-list{display:flex;flex-direction:column;gap:2px;overflow-y:auto;min-height:0}
+  .proj-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent;color:#b9bbc1;text-align:left;background:none;width:100%}
+  .proj-item:hover{background:var(--rail2);color:#fff}
+  .proj-item.on{background:var(--brand-tint);border-color:var(--brand-line);color:#fff}
+  .proj-item .pi-dot{width:7px;height:7px;border-radius:50%;background:#52555d;flex:none}
+  .proj-item.on .pi-dot{background:var(--brand)}
+  .proj-item .pi-main{min-width:0;flex:1;display:flex;flex-direction:column;gap:1px}
+  .proj-item .pi-name{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .proj-item .pi-meta{font-size:10px;color:#8b8d94;font-weight:600}
+  .proj-item .pi-x{opacity:0;color:#8b8d94;font-size:15px;line-height:1;padding:0 2px;flex:none}
+  .proj-item:hover .pi-x{opacity:.7} .proj-item .pi-x:hover{opacity:1;color:var(--neg)}
+  /* ---------- active-project chip (topbar) ---------- */
+  .proj-chip{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:999px;background:var(--brand-tint);border:1px solid var(--brand-line);color:#fff;font-size:13px;font-weight:700;max-width:230px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .proj-chip .pc-dot{width:7px;height:7px;border-radius:50%;background:var(--brand);flex:none}
+  .vsep{color:var(--faint);font-weight:400}
+  .export-ppt{display:inline-flex;align-items:center;gap:7px;text-decoration:none}
+  .export-ppt svg{width:15px;height:15px;stroke:#fff;fill:none;stroke-width:1.8}
+  /* ---------- branded platform buttons (Mentions) ---------- */
+  .platbar{margin-bottom:16px}
+  .pb-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .pb-label{font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:var(--faint);font-weight:700}
+  .plat-reset{font-size:11.5px;font-weight:700;color:var(--ink2);background:var(--panel2);border:1px solid var(--line2);border-radius:999px;padding:5px 13px;cursor:pointer}
+  .plat-reset:hover{border-color:var(--line3);color:var(--ink)}
+  .plat-reset.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .pb-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:13px}
+  .plat-card{position:relative;text-align:left;border:1px solid var(--line2);background:var(--panel);border-radius:14px;padding:15px 17px 16px;cursor:pointer;overflow:hidden;transition:transform .13s ease,border-color .13s ease,box-shadow .13s ease}
+  .plat-card:hover{transform:translateY(-2px);border-color:var(--line3)}
+  .plat-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--pc-accent,#888)}
+  .plat-card.on{background:var(--pc-tint);border-color:var(--pc-accent);box-shadow:inset 0 0 0 1.5px var(--pc-accent),0 12px 30px rgba(0,0,0,.42)}
+  .plat-card.on .pc-name{color:var(--pc-accent)}
+  .plat-card.on .pc-cov{border-color:var(--pc-accent);color:var(--pc-accent)}
+  .plat-card:focus-visible{outline:2px solid var(--pc-accent);outline-offset:2px}
+  .pc-top{display:flex;align-items:center;gap:11px;margin-bottom:13px}
+  .pc-ic{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:none}
+  .pc-ic svg{width:19px;height:19px;display:block}
+  .pc-name{font-size:15.5px;font-weight:800;color:var(--ink);letter-spacing:.2px}
+  .pc-cov{margin-left:auto;font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:var(--faint);font-weight:700;border:1px solid var(--line2);border-radius:999px;padding:3px 9px}
+  .pc-metrics{display:grid;grid-template-columns:1fr 1fr;gap:11px 16px}
+  .pc-metrics>div{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .pc-metrics b{font-size:19px;font-weight:800;color:var(--ink);line-height:1;letter-spacing:-.3px}
+  .pc-metrics .pm-l{font-size:9.5px;letter-spacing:.4px;text-transform:uppercase;color:var(--faint);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pc-tiktok{--pc-accent:#25f4ee;--pc-tint:#0c1c1c} .pc-tiktok .pc-ic{background:#000;border:1px solid #2b2b2b}
+  .pc-youtube{--pc-accent:#ff2b3e;--pc-tint:#2a1417} .pc-youtube .pc-ic{background:#ff0033}
+  .pc-news{--pc-accent:#5b8def;--pc-tint:#172339} .pc-news .pc-ic{background:#26344e}
+  @media(max-width:880px){.pb-grid{grid-template-columns:1fr}}
+  /* branded source tags in the feed + selected-platform highlight on the section */
+  .src-tag.st-tiktok{background:#0c1c1c;border-color:#1e6f6c;color:#3df0e8}
+  .src-tag.st-youtube{background:#2a1417;border-color:#7a2230;color:#ff8a96}
+  .src-tag.st-news{background:var(--brand-tint);border-color:var(--brand-line);color:var(--brand2)}
+  #viewMentions[data-sel] #feed{box-shadow:inset 4px 0 0 var(--sel-accent)}
+  #viewMentions[data-sel] #feedCount{color:var(--sel-accent);font-weight:700}
+  #viewMentions[data-sel] .search:focus{border-color:var(--sel-accent)}
 
   .main{display:flex;flex-direction:column;min-width:0}
 
@@ -301,6 +359,10 @@
         Analytics
       </button>
     </nav>
+    <div class="projwrap">
+      <div class="proj-h"><span>Projects</span><button class="proj-add" id="newProjBtn" title="New project"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button></div>
+      <div class="proj-list" id="projList"></div>
+    </div>
     <div class="spacer"></div>
     <div class="railfoot">
       <div class="internal" id="internalLabel" style="display:none">Internal use only</div>
@@ -312,6 +374,8 @@
     <!-- top context bar -->
     <div class="topbar">
       <button class="iconbtn railToggle" id="railToggle" title="Menu"><svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
+      <span class="proj-chip" id="projChip" title="Active project"><span class="pc-dot"></span><span id="projChipName">Project</span></span>
+      <span class="vsep">/</span>
       <span class="vtitle" id="viewTitle">Sources</span>
       <div class="ctx">
         <div class="field"><select class="sel" id="termSel" title="Tracked term"><option value="">All terms</option></select></div>
@@ -349,17 +413,8 @@
       </div>
       <div class="topright">
         <span class="runpill" id="runStat"><span class="dot"></span><span id="statusTxt">Loading</span></span>
-        <div class="field">
-          <button class="iconbtn" id="navExport"><svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M5 21h14"/></svg>Export</button>
-          <div class="menu" id="exportMenu">
-            <div class="scope" style="border:none;margin:0;padding-bottom:6px">Download current selection</div>
-            <a class="exp-pptx" download>PowerPoint report <span class="ar">PPTX</span></a>
-            <a class="exp-csv" download>Mentions CSV <span class="ar">CSV</span></a>
-            <a class="exp-json" download>Insights JSON <span class="ar">JSON</span></a>
-            <a class="exp-report" target="_blank">Printable report <span class="ar">open</span></a>
-            <div class="scope" id="menuScope"></div>
-          </div>
-        </div>
+        <a class="btn export-ppt" id="exportPpt" download title="Export this project as a PowerPoint deck">
+          <svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M5 21h14"/></svg>Export PPT</a>
       </div>
     </div>
     <div id="dateErr" class="err" style="display:none"></div>
@@ -387,15 +442,15 @@
 
     <!-- ============ VIEW: MENTIONS ============ -->
     <section class="view" id="viewMentions">
+      <div class="platbar" id="platformBar"></div>
       <div class="toolbar">
         <input class="inp search" id="fSearch" placeholder="Search within mentions" />
-        <select class="sel" id="fSource"><option value="">All sources</option></select>
         <select class="sel" id="fSentiment"><option value="">All sentiment</option><option value="positive">Positive</option><option value="neutral">Neutral</option><option value="negative">Negative</option></select>
         <select class="sel" id="fCoverage">
           <option value="">All coverage</option>
           <option value="direct">Direct platform data</option>
           <option value="open_web_reference">Open-web reference</option>
-          <option value="open_network_public">Open network</option>
+          <option value="known_url_enrichment">Known URL enrichment</option>
           <option value="direct_licensed_provider">Licensed provider</option>
         </select>
         <select class="sel" id="fSort">
@@ -457,6 +512,14 @@
   <div class="row"><button class="btn" id="ttDo">Enrich URLs</button><button class="btn quiet" id="ttCancel">Cancel</button><span class="msg" id="ttMsg"></span></div>
 </div>
 
+<div class="scrim" id="projScrim"></div>
+<div class="ttmodal" id="projModal">
+  <div class="dh"><h2 id="projModalTitle">New project</h2><span class="closeX" id="projClose">Close</span></div>
+  <div class="lead">Every research lives in a project. Mentions, analytics, and the PowerPoint export are stored and scoped per project, so nothing mixes between them.</div>
+  <input class="inp" id="projName" placeholder="Project name (e.g. Acme Q3 Launch)" style="width:100%;height:42px" />
+  <div class="row"><button class="btn" id="projDo">Create project</button><button class="btn quiet" id="projCancel">Cancel</button><span class="msg" id="projMsg"></span></div>
+</div>
+
 <script>
 /* ---------------- helpers ---------------- */
 const $=id=>document.getElementById(id);
@@ -476,7 +539,7 @@ function fmtRange(s,e){return (fmtDate(s)||s||'')+' to '+(fmtDate(e)||e||'');}  
 function parseList(v){if(Array.isArray(v))return v;try{return JSON.parse(v||'[]')}catch(e){return [];}}
 
 const PLAT_NAMES={open_web:'Open web discovery',youtube:'YouTube',reddit:'Reddit',x:'X / Twitter',meta:'Meta',instagram:'Instagram',facebook:'Facebook',tiktok:'TikTok',licensed:'Licensed provider'};
-const PLAT_ORDER=['youtube','open_web','reddit','x','meta','instagram','facebook','tiktok','licensed'];
+const PLAT_ORDER=['tiktok','youtube','open_web','reddit','x','meta','instagram','facebook','licensed'];
 const PLAT_DISP=PLAT_NAMES;
 const SRC_ICON={open_web:'OW',youtube:'YT',reddit:'RD',x:'X',meta:'MT',instagram:'IG',facebook:'FB',tiktok:'TT',licensed:'LP'};
 const SRC_PATH={open_web:'Brave Search API',youtube:'YouTube Data API v3',reddit:'Official Data API',x:'API v2',meta:'Graph API',instagram:'Graph API',facebook:'Graph API',tiktok:'Research API',licensed:'Licensed feed'};
@@ -485,10 +548,11 @@ const COV_BADGE={direct_official_api:'Direct API',direct_connected_account:'Conn
 const RESULT_TYPE={news_article:'News article',web_article:'Web article',discussion:'Discussion',instagram_post_reference:'Instagram post',facebook_post_reference:'Facebook post',tiktok_video_reference:'TikTok video',known_url_enrichment:'Known URL',manual_import:'Manual import'};
 
 /* ---------------- state ---------------- */
-const state={term:'',start:shiftISO(90),end:todayISO(),view:'sources'};
-const filters={q:'',source:'',sentiment:'',coverage:'',sort:'newest'};
+const state={term:'',start:shiftISO(90),end:todayISO(),view:'sources',project:''};
+const filters={q:'',platform:'',sentiment:'',coverage:'',sort:'newest'};
 let lastFeed=[],matrixCache=null,platformsCache=[],lastCollectedAt=null;
 let cfgCache=null,sourcesCache=null,lastJobResult=null,lastMetrics=null;
+let projects=[];
 
 function loadState(){
   const p=new URLSearchParams(location.search);
@@ -497,16 +561,19 @@ function loadState(){
   state.start=p.get('start')??ls.start??shiftISO(90);
   state.end=p.get('end')??ls.end??todayISO();
   state.view=p.get('view')??ls.view??'sources';
+  state.project=p.get('project')??ls.project??'';
   lastCollectedAt=ls.lastCollectedAt||null;
 }
 function saveState(){
   const p=new URLSearchParams();
   if(state.term)p.set('term',state.term);
   p.set('start',state.start);p.set('end',state.end);if(state.view!=='sources')p.set('view',state.view);
+  if(state.project)p.set('project',state.project);
   history.replaceState(null,'','?'+p.toString());
   localStorage.setItem('pulse',JSON.stringify({...state,lastCollectedAt}));
 }
-function qstr(){return (state.term?('keyword='+encodeURIComponent(state.term)+'&'):'')+'start='+state.start+'&end='+state.end;}
+function qstr(){return (state.term?('keyword='+encodeURIComponent(state.term)+'&'):'')+'start='+state.start+'&end='+state.end
+  +(state.project?('&project='+encodeURIComponent(state.project)):'');}
 function syncInputs(){$('start').value=state.start;$('end').value=state.end;$('termSel').value=state.term;}
 let _job=null,_poll=null;
 function validate(){
@@ -584,7 +651,7 @@ function renderTerms(tracked,counts){
   });
   $('termChips').querySelectorAll('.x').forEach(el=>el.onclick=async e=>{
     e.stopPropagation();const l=el.getAttribute('data-x');el.textContent='.';
-    try{await api('/api/keywords/remove?kw='+encodeURIComponent(l),{method:'POST'});}catch(_){}
+    try{await api('/api/keywords/remove?kw='+encodeURIComponent(l)+'&'+qstr(),{method:'POST'});}catch(_){}
     if(state.term===l)state.term='';refresh();
   });
   // selector (top bar)
@@ -716,7 +783,7 @@ const sorters={
 function applyFeed(){
   let rows=lastFeed.slice();
   if(filters.q){const q=filters.q.toLowerCase();rows=rows.filter(r=>((r.content||'')+' '+(r.author||'')).toLowerCase().includes(q));}
-  if(filters.source)rows=rows.filter(r=>(r.display_platform||cap(r.platform))===filters.source);
+  if(filters.platform)rows=rows.filter(r=>platKey(r)===filters.platform); // same buckets as backend + src-tags
   if(filters.sentiment)rows=rows.filter(r=>(r.sentiment||'neutral')===filters.sentiment);
   if(filters.coverage){
     if(filters.coverage==='direct')rows=rows.filter(r=>!!r.direct_platform_data);
@@ -740,7 +807,7 @@ function feedHTML(rows){
     'Add a tracked term in the bar above and press <b>Collect</b>, or widen the date range. '+
     'Live sources: <span class="linklike" id="goSources">YouTube, open web</span>.</div>';
   return '<div class="mhead"><span>Source</span><span>Mention</span><span class="r">Engagement</span></div>'+rows.map(m=>{
-    const disp=m.display_platform||cap(m.platform);
+    const disp=(m.display_platform==='Open Web / News')?'News':(m.display_platform||cap(m.platform));
     const direct=!!m.direct_platform_data;
     const eng=Number(m.engagement)||0,reach=Number(m.reach)||0;
     const cov=coverageLine(m);
@@ -756,7 +823,7 @@ function feedHTML(rows){
     if(m.sentiment)meta.push('<span class="sent '+esc(m.sentiment)+'">'+esc(m.sentiment)+'</span>');
     const metaH=meta.join('<span class="sep">·</span>');
     const nums=(eng||reach)?('<div class="nums">'+(eng?'<span><b>'+fmt(eng)+'</b> eng</span>':'')+(reach?'<span>'+fmt(reach)+' reach</span>':'')+'</div>'):'<div class="nums"><span class="nometric">no public metric</span></div>';
-    return '<div class="mrow"><div class="src-cell"><span class="src-tag" title="'+esc(disp)+'">'+esc(disp)+'</span></div>'+
+    return '<div class="mrow"><div class="src-cell"><span class="src-tag st-'+platKey(m)+'" title="'+esc(disp)+'">'+esc(disp)+'</span></div>'+
       '<div class="body"><a class="mt" href="'+esc(m.url||'#')+'" target="_blank" rel="noopener">'+esc(m.content||m.author||'(untitled)')+'</a>'+
       desc+'<div class="meta">'+metaH+(m.author?'<span class="sep">·</span><span>'+esc(m.author)+'</span>':'')+'</div></div>'+nums+'</div>';
   }).join('');
@@ -767,24 +834,48 @@ function renderFeed(){
   $('feedCount').textContent=rows.length?(rows.length+(rows.length===1?' mention':' mentions')):'';
   const gs=$('goSources');if(gs)gs.onclick=()=>setView('sources');
 }
-function populateSourceFilter(platforms){
-  const cur=filters.source;
-  $('fSource').innerHTML='<option value="">All sources</option>'+(platforms||[]).map(p=>'<option value="'+esc(p.platform)+'">'+esc(p.platform)+'</option>').join('');
-  $('fSource').value=cur;
+const PBAR_ICON={
+  tiktok:'<svg viewBox="0 0 24 24" fill="#fff"><path d="M16.6 5.8a4.6 4.6 0 0 0 3.4 1.6v2.7a7.5 7.5 0 0 1-3.8-1.1v5.5a5.4 5.4 0 1 1-5.4-5.4c.3 0 .6 0 .9.1v2.8a2.6 2.6 0 1 0 1.8 2.5V3h2.6c0 1 .2 1.9.5 2.8z"/></svg>',
+  youtube:'<svg viewBox="0 0 24 24" fill="#fff"><path d="M10 8.4l6 3.6-6 3.6z"/></svg>',
+  news:'<svg viewBox="0 0 24 24" fill="none" stroke="#c7d3ec" stroke-width="1.7"><path d="M4 5h12v14H6a2 2 0 0 1-2-2z"/><path d="M16 9h4v8a2 2 0 0 1-2 2"/><path d="M7 8.5h6M7 11.5h6M7 14.5h4"/></svg>'};
+const PLAT_ACCENT={tiktok:'#25f4ee',youtube:'#ff2b3e',news:'#5b8def'};
+function platKey(r){if((r.display_platform||'')==='TikTok URL')return 'tiktok';if(r.platform==='youtube')return 'youtube';return 'news';}
+function pmetric(v,l){return '<div><b>'+(v==null?0:v)+'</b><span class="pm-l">'+l+'</span></div>';}
+function renderPlatformBar(stats){
+  stats=stats||[];
+  const head='<div class="pb-head"><span class="pb-label">Platforms</span>'+
+    '<button class="plat-reset'+(filters.platform===''?' on':'')+'" data-p="">All platforms</button></div>';
+  const cards=stats.map(s=>{
+    const cov=esc(s.coverage)+(s.estimated?' · est.':'');
+    return '<button class="plat-card pc-'+esc(s.key)+(filters.platform===s.key?' on':'')+'" data-p="'+esc(s.key)+'">'+
+      '<div class="pc-top"><span class="pc-ic">'+(PBAR_ICON[s.key]||'')+'</span>'+
+        '<span class="pc-name">'+esc(s.label)+'</span><span class="pc-cov">'+cov+'</span></div>'+
+      '<div class="pc-metrics">'+pmetric(s.mentions,'Mentions')+pmetric(fmt(s.reach),'Reach')+
+        pmetric(fmt(s.engagement),'Engagement')+pmetric(s.visibility,'Visibility')+'</div></button>';
+  }).join('');
+  $('platformBar').innerHTML=head+'<div class="pb-grid">'+cards+'</div>';
+  $('platformBar').querySelectorAll('[data-p]').forEach(el=>el.onclick=()=>{
+    const p=el.getAttribute('data-p');
+    filters.platform=(filters.platform===p)?'':p;   // toggle off when the active card is re-clicked
+    applySelectedBranding();
+    renderPlatformBar(lastMetrics&&lastMetrics.platformStats);renderFeed();
+  });
+  applySelectedBranding();
+}
+function applySelectedBranding(){
+  // Extend the active platform's brand identity to the whole Mentions section.
+  const vm=$('viewMentions');if(!vm)return;
+  if(filters.platform){vm.setAttribute('data-sel',filters.platform);vm.style.setProperty('--sel-accent',PLAT_ACCENT[filters.platform]||'var(--brand)');}
+  else{vm.removeAttribute('data-sel');vm.style.removeProperty('--sel-accent');}
 }
 $('fSearch').oninput=()=>{filters.q=$('fSearch').value.trim();renderFeed();};
-$('fSource').onchange=()=>{filters.source=$('fSource').value;renderFeed();};
 $('fSentiment').onchange=()=>{filters.sentiment=$('fSentiment').value;renderFeed();};
 $('fCoverage').onchange=()=>{filters.coverage=$('fCoverage').value;renderFeed();};
 $('fSort').onchange=()=>{filters.sort=$('fSort').value;renderFeed();};
 
 function updateExports(){
-  const q=qstr();
-  document.querySelectorAll('.exp-pptx').forEach(a=>a.href='/api/export/report.pptx?'+q);
-  document.querySelectorAll('.exp-csv').forEach(a=>a.href='/api/export/mentions.csv?'+q);
-  document.querySelectorAll('.exp-json').forEach(a=>a.href='/api/export/insights.json?'+q);
-  document.querySelectorAll('.exp-report').forEach(a=>a.href='/api/report?'+q);
-  $('menuScope').textContent='Scope: '+(state.term||'all terms')+', '+fmtRange(state.start,state.end);
+  // Single export action: the active project as a PowerPoint deck.
+  const ep=$('exportPpt');if(ep)ep.href='/api/export/report.pptx?'+qstr();
 }
 
 /* ---------------- refresh ---------------- */
@@ -799,12 +890,12 @@ async function refresh(){
     renderKPIs(m);
     renderSentiment(m.sentiment);
     renderVolume(m.volume);
-    renderBars('topPlatforms',m.platforms,'platform','value');
+    renderBars('topPlatforms',m.platformStats,'label','mentions'); // unified TikTok/YouTube/News taxonomy
     renderBars('topTopics',m.topics,'label','count');
-    renderBars('engByPlat',m.engagementByPlatform,'platform','engagement');
+    renderBars('engByPlat',m.platformStats,'label','engagement'); // same TikTok/YouTube/News taxonomy as the buttons
     renderRankAuthors(m.authors);
     renderTopContent(m.topContent);
-    populateSourceFilter(m.platforms);
+    renderPlatformBar(m.platformStats);
     if(platformsCache.length)renderSources(platformsCache);
     lastFeed=await (await api('/api/mentions?limit=200&'+qstr())).json();  // always show stored results in scope
     renderFeed();
@@ -903,9 +994,9 @@ $('collectBtn').onclick=async()=>{
 };
 $('cancelBtn').onclick=async()=>{if(!_job)return;busy(true,'Stopping');try{await api('/api/jobs/'+_job+'/cancel',{method:'POST'});}catch(_){}};
 function resetFilterUI(){
-  filters.q='';filters.source='';filters.sentiment='';filters.coverage='';
+  filters.q='';filters.platform='';filters.sentiment='';filters.coverage='';
   const fs=$('fSearch');if(fs)fs.value='';
-  ['fSource','fSentiment','fCoverage'].forEach(id=>{const el=$(id);if(el)el.value='';});
+  ['fSentiment','fCoverage'].forEach(id=>{const el=$(id);if(el)el.value='';});
 }
 function resetClientState(){
   // Full client-side wipe so no stale term, filter, cache, graph, or dataset survives.
@@ -917,7 +1008,7 @@ function resetClientState(){
 $('clearBtn').onclick=async()=>{
   if(!confirm('Clear the whole project? This permanently removes all tracked terms, mentions, filters, and cached results.'))return;
   busy(true,'Clearing project');
-  try{await api('/api/keywords/clear',{method:'POST'});}catch(_){}
+  try{await api('/api/keywords/clear?'+qstr(),{method:'POST'});}catch(_){}
   resetClientState();saveState();
   await refresh();
   busy(false,'Project cleared');
@@ -925,9 +1016,6 @@ $('clearBtn').onclick=async()=>{
 
 /* ---------------- overlays ---------------- */
 function lock(on){document.body.classList.toggle('noscroll',on);}
-function closeExportMenu(){$('exportMenu').classList.remove('open');}
-$('navExport').onclick=e=>{e.stopPropagation();$('exportMenu').classList.toggle('open');};
-document.addEventListener('click',e=>{if(!$('exportMenu').contains(e.target)&&!$('navExport').contains(e.target))closeExportMenu();});
 
 async function openCoverage(){
   $('covScrim').classList.add('open');$('covDrawer').classList.add('open');lock(true);
@@ -963,7 +1051,7 @@ $('ttDo').onclick=async()=>{
   const urls=$('ttUrls').value.trim();const term=state.term||'tiktok urls';
   if(!urls){$('ttMsg').textContent='Paste one or more TikTok video URLs.';return;}
   $('ttDo').disabled=true;$('ttMsg').textContent='Enriching';
-  try{const r=await (await api('/api/enrich/urls',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls,term})})).json();
+  try{const r=await (await api('/api/enrich/urls?'+qstr(),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls,term})})).json();
     const rej=(r.rejected&&r.rejected.length)?(' '+r.rejected.length+' rejected (not TikTok video URLs).'):'';
     $('ttMsg').textContent='Enriched '+(r.enriched||0)+' URL'+((r.enriched||0)===1?'':'s')+'.'+rej;
     if(!state.term)state.term=term;$('ttUrls').value='';
@@ -973,18 +1061,82 @@ $('ttDo').onclick=async()=>{
 
 $('aiBtn').onclick=async()=>{
   $('aiBtn').disabled=true;$('aiOut').textContent='Generating internal insight';
-  try{const r=await (await api('/api/ai/insights',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tracked_terms:state.term?[state.term]:[],platforms:[],start_date:state.start,end_date:state.end})})).json();
+  try{const r=await (await api('/api/ai/insights?'+qstr(),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tracked_terms:state.term?[state.term]:[],platforms:[],start_date:state.start,end_date:state.end})})).json();
     if(r.error){$('aiOut').textContent=r.error;}
     else{$('aiOut').innerHTML='<b style="color:var(--ink)">'+esc(r.summary)+'</b>'+(r.key_themes&&r.key_themes.length?'<br>Themes: '+r.key_themes.map(esc).join(', '):'')+'<br><span class="tiny">'+esc(r.coverage_note||'')+'</span>';}
   }catch(e){$('aiOut').textContent='AI request failed.';}
   $('aiBtn').disabled=false;
 };
 
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeCoverage();closeExportMenu();closeDatePanel();closeTT();}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeCoverage();closeProjModal();closeDatePanel();closeTT();}});
+
+/* ---------------- projects ---------------- */
+function setProjChip(){
+  const pr=projects.find(p=>p.id===state.project)||projects[0];
+  $('projChipName').textContent=pr?pr.name:'Project';
+}
+function renderProjects(){
+  const list=$('projList');if(!list)return;
+  list.innerHTML=(projects||[]).map(p=>{
+    const on=p.id===state.project?' on':'';
+    const meta=(p.mentions||0)+' mention'+((p.mentions||0)===1?'':'s')+(p.terms?(' · '+p.terms+' term'+(p.terms===1?'':'s')):'');
+    return '<button class="proj-item'+on+'" data-id="'+esc(p.id)+'"><span class="pi-dot"></span>'+
+      '<span class="pi-main"><span class="pi-name">'+esc(p.name)+'</span><span class="pi-meta">'+meta+'</span></span>'+
+      '<span class="pi-x" data-del="'+esc(p.id)+'" title="Delete project">&times;</span></button>';
+  }).join('')||'<div class="pi-meta" style="padding:6px 10px">No projects yet</div>';
+  list.querySelectorAll('.proj-item').forEach(el=>el.onclick=e=>{
+    if(e.target.classList.contains('pi-x'))return;
+    switchProject(el.getAttribute('data-id'));
+  });
+  list.querySelectorAll('.pi-x').forEach(el=>el.onclick=e=>{e.stopPropagation();deleteProjectUI(el.getAttribute('data-del'));});
+  setProjChip();
+}
+async function loadProjects(){
+  try{
+    const d=await (await api('/api/projects'+(state.project?('?project='+encodeURIComponent(state.project)):''))).json();
+    projects=d.projects||[];
+    if(!projects.some(p=>p.id===state.project))state.project=d.active||(projects[0]&&projects[0].id)||'';
+    renderProjects();saveState();
+  }catch(_){}
+}
+function switchProject(id){
+  if(!id||id===state.project)return;
+  state.project=id;state.term='';resetFilterUI();filters.sort='newest';const so=$('fSort');if(so)so.value='newest';
+  lastFeed=[];lastMetrics=null;
+  saveState();renderProjects();refresh();
+}
+function openProjModal(){$('projName').value='';$('projMsg').textContent='';$('projScrim').classList.add('open');$('projModal').classList.add('open');lock(true);setTimeout(()=>$('projName').focus(),40);}
+function closeProjModal(){$('projScrim').classList.remove('open');$('projModal').classList.remove('open');lock(false);}
+$('newProjBtn').onclick=openProjModal;
+$('projClose').onclick=closeProjModal;$('projCancel').onclick=closeProjModal;$('projScrim').onclick=closeProjModal;
+$('projDo').onclick=async()=>{
+  const name=$('projName').value.trim();
+  if(!name){$('projMsg').textContent='Enter a project name.';return;}
+  $('projDo').disabled=true;$('projMsg').textContent='Creating';
+  try{
+    const r=await (await api('/api/projects/create?name='+encodeURIComponent(name),{method:'POST'})).json();
+    projects=r.projects||projects;const np=r.project;closeProjModal();
+    if(np&&np.id){state.project=np.id;state.term='';resetFilterUI();lastFeed=[];lastMetrics=null;saveState();renderProjects();refresh();}
+  }catch(e){$('projMsg').textContent='Create failed.';}
+  $('projDo').disabled=false;
+};
+$('projName').onkeydown=e=>{if(e.key==='Enter')$('projDo').click();};
+async function deleteProjectUI(id){
+  const p=projects.find(x=>x.id===id);if(!p)return;
+  if(!confirm('Delete project "'+p.name+'"? This permanently removes its tracked terms, mentions, and stored data.'))return;
+  try{
+    const r=await (await api('/api/projects/delete?id='+encodeURIComponent(id),{method:'POST'})).json();
+    if(r.ok===false){alert('You cannot delete the last project. Create another first.');return;}
+    projects=r.projects||[];
+    if(state.project===id){state.project=r.active||(projects[0]&&projects[0].id)||'';state.term='';resetFilterUI();lastFeed=[];lastMetrics=null;}
+    saveState();renderProjects();refresh();
+  }catch(_){}
+}
 
 /* ---------------- init ---------------- */
 loadState();syncInputs();validate();updateDateLabel();setView(state.view);
-function boot(){
+async function boot(){
+  await loadProjects();
   api('/api/sources').then(r=>r.json()).then(d=>{sourcesCache=d;matrixCache=d.sources;renderSources(d.platforms||[]);}).catch(()=>{});
   refresh();
   setInterval(()=>{if($('runStat').dataset.busy!=='1'&&!_job)refresh();},25000);

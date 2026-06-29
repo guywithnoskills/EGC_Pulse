@@ -123,9 +123,32 @@ ranked by frequency (top 8).
   highest-visibility items), with their platform, engagement, reach, and link.
 
 ### 2.8 Volume and engagement-by-platform
-- **Volume:** mention count grouped by day across the range (the time series).
-- **Engagement by platform / top platforms:** `SUM(engagement)` and mention
-  counts grouped by display platform.
+- **Volume:** mention count grouped by day across the range (the time series). In
+  the PowerPoint export this is aggregated to a readable, chronological axis:
+  daily up to 16 points, then weekly, then monthly, labeled YY/MM/DD (or YY/MM).
+- **Engagement by platform / top platforms:** grouped into the three product
+  platforms (TikTok, YouTube, News) — the same buckets as the platform buttons.
+
+### 2.9 Platform-button metrics (TikTok / YouTube / News)
+The three platform buttons summarize each platform with mentions, reach, engagement,
+estimated audience, and visibility. Mentions bucket by display classification
+(`TikTok URL` -> TikTok, `youtube` -> YouTube, everything else -> News) so the
+buttons always reconcile to total mentions.
+
+YouTube uses its **measured** views/likes/comments. TikTok references and News/open-web
+articles expose **no per-post public metric**, so their button-level reach and
+engagement are an explicit **estimate** (flagged "est." in the UI and deck):
+
+```
+reach_est      = mentions * BASE_REACH[platform]       # TikTok 4500, News 1500 per surfaced item
+engagement_est = round(reach_est * ENG_RATE[platform]) # TikTok 5.5%, News 1.5%
+estimated audience = round(reach_est * 0.75)
+```
+
+These are deterministic from the collected mention volume (not arbitrary), keep the
+buttons informative, and are clearly labeled as estimates. **Per-mention feed rows
+and the headline KPIs remain on measured data only** — a row with no public metric
+still shows "no public metric"; nothing is fabricated at the item level.
 
 ---
 
