@@ -34,6 +34,7 @@ import platform_access_manager as pam
 import ai_policy as aip
 import source_truth as struth
 import compliant_discovery as cd
+import wikipedia_monitor as wm
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # DB lives next to the app by default; override with PULSE_DB to point at a
@@ -41,7 +42,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("PULSE_DB") or os.path.join(HERE, "pulse_demo.db")
 KEYWORDS_PATH = os.path.join(HERE, "keywords.json")
 PORT = int(os.environ.get("PORT", "8787"))
-DEFAULT_KEYWORDS = []
 
 
 def now_iso():
@@ -106,15 +106,6 @@ def create_project(name):
     with db() as c:
         c.execute("INSERT INTO projects (id, name, created_at) VALUES (?,?,?)", (pid, name, now_iso()))
     return {"id": pid, "name": name, "created_at": now_iso(), "mentions": 0, "terms": 0}
-
-
-def rename_project(pid, name):
-    name = (name or "").strip()
-    if not (pid and name):
-        return False
-    with db() as c:
-        c.execute("UPDATE projects SET name = ? WHERE id = ?", (name, pid))
-    return True
 
 
 def delete_project(pid):
@@ -199,20 +190,20 @@ def get_manual_insights():
     return [dict(r) for r in rows]
 
 
-_re_cache = {}
-
-
-def _term_re(term):
-    if term not in _re_cache:
-        t = term.strip()
-        prefix = r"(?<!\w)#" if t.startswith("#") else r"(?<!\w)"
-        body = re.escape(t[1:] if t.startswith("#") else t)
-        _re_cache[term] = re.compile(prefix + body + r"(?!\w)", re.I)
-    return _re_cache[term]
-
-
-def is_relevant(text, terms):
-    return bool(text) and any(_term_re(t).search(text) for t in terms)
+def term_in_record(r, term):
+    """Whole-word brand-context gate applied uniformly to EVERY source (not just
+    open web): the term must appear as a whole word in the record's title/content,
+    description, author, or URL path. Rejects substring-only and ambiguous hits the
+    same way for YouTube/Reddit/X as for open-web discovery."""
+    # Wikipedia terms that ARE a page (URL / Wikidata Q-id) were resolved by
+    # explicit intent; the raw term text can never appear in a revision record,
+    # so those records are already gated by the page resolution itself.
+    if r.get("platform") == "wikipedia" and wm.explicit_intent(term):
+        return True
+    return cd.result_has_brand_context(
+        {"title": r.get("content") or "", "snippet": "",
+         "description": (r.get("description") or "") + " " + (r.get("author") or ""),
+         "url": r.get("url") or ""}, term)
 
 
 # ── sentiment (lexicon, pure python) ─────────────────────────────────────────
@@ -303,6 +294,7 @@ def init_db():
         if "project_id" not in cols:
             c.execute("ALTER TABLE mentions ADD COLUMN project_id TEXT")
         c.execute("CREATE INDEX IF NOT EXISTS idx_proj ON mentions(project_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_ch ON mentions(project_id, content_hash)")
         # Ensure at least one project exists, then home any orphan data into it.
         row = c.execute("SELECT id FROM projects ORDER BY created_at, rowid LIMIT 1").fetchone()
         if not row:
@@ -410,13 +402,36 @@ def ingest(records, project=None):
     n = 0
     now = now_iso()
     pid = resolve_project(project)
+    seen_ch = set()
     with db() as c:
         for r in records:
             if is_suppressed(r["platform"], r["platform_post_id"]):
                 continue
-            label, score = analyze_sentiment(((r.get("content") or "") + " " + (r.get("description") or "")).strip())
+            if r.get("platform") == "wikipedia":
+                # Edit summaries / editor names / generated risk-flag text are not
+                # audience sentiment about the brand; revisions stay neutral.
+                label, score = "neutral", 0.0
+            else:
+                label, score = analyze_sentiment(((r.get("content") or "") + " " + (r.get("description") or "")).strip())
             posted = r.get("posted_at") or now
-            ch = hashlib.sha256((r["platform"] + ":" + re.sub(r"\s+", " ", (r.get("content") or "").lower())).encode()).hexdigest()
+            content_norm = re.sub(r"\s+", " ", (r.get("content") or "").lower()).strip()
+            # Content-level dedup within the project: collapse the same item syndicated
+            # to different URLs (same content, different platform_post_id) which the
+            # (platform, post_id, keyword, project) UNIQUE constraint would not catch.
+            # Wikipedia hashes are salted with title#revid so distinct revisions that
+            # share identical summary text stay distinct EVENTS, while the SAME
+            # revision re-collected under a second tracked term collapses like any
+            # other source (no double-counting in all-terms views).
+            if r.get("platform") == "wikipedia":
+                content_norm = content_norm + "|" + str(r.get("platform_post_id"))
+            ch = hashlib.sha256(content_norm.encode()).hexdigest()
+            if len(content_norm) >= 12:
+                if ch in seen_ch:
+                    continue
+                if c.execute("SELECT 1 FROM mentions WHERE project_id=? AND content_hash=? LIMIT 1",
+                             (r.get("project_id") or pid, ch)).fetchone():
+                    continue
+                seen_ch.add(ch)
             try:
                 cur = c.execute(
                     "INSERT OR IGNORE INTO mentions (platform, platform_post_id, keyword, author, content, "
@@ -459,7 +474,7 @@ def collect(term, start=None, end=None, project=None):
     records, runs = [], []
     with ThreadPoolExecutor(max_workers=10) as ex:
         for src, got, windows in (ex.map(run_one, sources) if sources else []):
-            rel = [r for r in got if is_relevant((r.get("content") or "") + " " + (r.get("author") or ""), [term])]
+            rel = [r for r in got if term_in_record(r, term)]   # uniform brand-context gate (all sources)
             ctx = {"source_key": src.key, "access_path": src.access_path.value, "source_name": src.display_name}
             for r in rel:
                 r["keyword"] = term
@@ -651,7 +666,10 @@ def metrics(keyword=None, start=None, end=None, project=None):
             "COUNT(*) n, COALESCE(SUM(engagement),0) eng, COALESCE(SUM(reach),0) impr, "
             "COALESCE(SUM(CASE WHEN reach>0 THEN reach*0.75 WHEN engagement>0 THEN engagement*22.0 ELSE 0 END),0) reach_est, "
             "SUM(CASE WHEN sentiment='positive' THEN 1 ELSE 0 END) pos, "
-            "SUM(CASE WHEN sentiment='negative' THEN 1 ELSE 0 END) neg "
+            "SUM(CASE WHEN sentiment='negative' THEN 1 ELSE 0 END) neg, "
+            # Wikipedia revisions are edit EVENTS, not audience-reached content items;
+            # they must never feed the per-item reach/engagement estimation.
+            "SUM(CASE WHEN platform='wikipedia' THEN 1 ELSE 0 END) wiki_n "
             "FROM mentions WHERE " + where + " GROUP BY bucket", wp).fetchall()
     sc = {r["s"]: r["n"] for r in sent}
     pos, neg, neu = sc.get("positive", 0), sc.get("negative", 0), sc.get("neutral", 0)
@@ -671,7 +689,7 @@ def metrics(keyword=None, start=None, end=None, project=None):
     platform_stats = []
     for key, label, cov in (("tiktok", "TikTok", "Open web + oEmbed"),
                             ("youtube", "YouTube", "Official API"),
-                            ("news", "News", "Open web")):
+                            ("news", "News", "Open web + Wikipedia")):
         r = _pby.get(key)
         n = r["n"] if r else 0
         e = r["eng"] if r else 0
@@ -684,10 +702,11 @@ def metrics(keyword=None, start=None, end=None, project=None):
         # documented per-item exposure factor, so the buttons are never empty.
         # Measured metrics (YouTube views/likes) always take precedence.
         estimated = False
-        if n > 0 and re_est <= 0:
-            re_est = n * _PLATFORM_BASE_REACH.get(key, 1500)
+        est_n = n - (r["wiki_n"] if r else 0)   # estimation basis: content items only
+        if est_n > 0 and re_est <= 0:
+            re_est = est_n * _PLATFORM_BASE_REACH.get(key, 1500)
             estimated = True
-        if n > 0 and e <= 0:
+        if est_n > 0 and e <= 0:
             e = int(round(re_est * _PLATFORM_ENG_RATE.get(key, 0.02)))
             estimated = True
         aud = int(round(re_est * 0.75)) if re_est else 0   # estimated unique audience
@@ -740,95 +759,6 @@ def coverage_ledger(keyword=None, start=None, end=None, project=None):
              for a in pam.accounts_status() if a["source_key"] != "manual" and not a["can_collect"]]
     return {"range": {"start": start, "end": end}, "term": keyword or "all terms",
             "coverage": m["coverage"], "sources_searched": m["platforms"], "gated": gated}
-
-
-def export_csv(keyword=None, start=None, end=None, project=None):
-    where, params = _filters(keyword, start, end, project)
-    with db() as c:
-        rows = [dict(r) for r in c.execute(
-            "SELECT keyword, display_platform, source_platform, searched_platform, discussed_platforms, "
-            "direct_platform_data, platform_coverage_type, source_key, coverage_label, coverage_note, url, posted_at, "
-            "author, sentiment, engagement, result_type, description, content FROM mentions WHERE " + where
-            + " ORDER BY posted_at DESC", params).fetchall()]
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    # Source-truth fields first (invariant), then the captured result_type + description + content.
-    w.writerow(struth.EXPORT_FIELDS + ["result_type", "description", "content"])
-    for r in rows:
-        safe = struth.export_safe_mention(r)
-        w.writerow([safe.get(f) for f in struth.EXPORT_FIELDS]
-                   + [r.get("result_type") or "",
-                      (r.get("description") or "").replace("\n", " "),
-                      (r.get("content") or "").replace("\n", " ")])
-    return buf.getvalue().encode()
-
-
-def export_insights(keyword=None, start=None, end=None, project=None):
-    m = metrics(keyword, start, end, project)
-    k = m["kpis"]
-    return {"generated_at": now_iso(), "keyword": keyword or "all", "start": start, "end": end,
-            "summary": "%s mentions in range. Net sentiment %+d (%d%% positive)." % (
-                "{:,}".format(k["totalMentions"]), k["netSentiment"], k["positivePct"]),
-            "sources": [s.to_dict() for s in pam.get_source_matrix()], **m}
-
-
-def report_html(keyword=None, start=None, end=None, project=None):
-    m = metrics(keyword, start, end, project)
-    k = m["kpis"]
-    rows = recent(20, keyword, None, None, start, end, project)
-    proj = project_name(project)
-    s = m["sentiment"]
-    tot = max(s["positive"] + s["neutral"] + s["negative"], 1)
-
-    def e(x):
-        return (str(x) if x is not None else "").replace("&", "&amp;").replace("<", "&lt;")
-
-    def ymd(d, fallback=""):
-        d = (d or "")[:10]
-        try:
-            y, mo, da = d.split("-")
-            return y[2:] + "/" + mo + "/" + da
-        except Exception:
-            return fallback
-    cov = m["coverage"]
-    plat = "".join("<tr><td>%s</td><td style='text-align:right'>%d</td></tr>" % (e(p["platform"]), p["value"]) for p in m["platforms"]) or "<tr><td>none</td></tr>"
-    feed = "".join("<li><a href='%s'>%s</a> <span style='color:#777'>. %s · %s</span></li>"
-                   % (e(r["url"] or "#"), e((r["content"] or "")[:140]), e(r.get("coverage_label") or r.get("display_platform")), e(r["sentiment"])) for r in rows) or "<li>none</li>"
-    searched = ", ".join("%s (%d)" % (e(d["platform"]), d["count"]) for d in cov["platforms_searched"]) or "none"
-    disc = ", ".join("%s (%d)" % (e(d["platform"]), d["count"]) for d in cov["platforms_discussed"]) or "none"
-    gated = [a for a in pam.accounts_status() if a["source_key"] != "manual" and not a["can_collect"]]
-    gated_html = "".join("<li>%s. %s</li>" % (e(a["platform"]), e(a["status"])) for a in gated) or "<li>none</li>"
-    cov_html = ("<h3>Coverage &amp; source truth</h3><ul>"
-                "<li>Direct platform data included: <b>%d</b></li>"
-                "<li>Open-web references included: <b>%d</b></li>"
-                "<li>Manual imports: <b>%d</b></li>"
-                "<li>Licensed-provider feeds: <b>%d</b></li>"
-                "<li>Platforms directly searched: %s</li>"
-                "<li>Platforms discussed but not directly searched: %s</li></ul>"
-                "<p class='muted'>Gated sources (not searched):</p><ul>%s</ul>"
-                "<p class='muted'>Caveat: open-web references mention a platform but are not that platform's native "
-                "data. Closed-platform listening requires connected accounts, approved research access, or a licensed "
-                "provider.</p>") % (cov["direct"], cov["open_web_references"], cov["manual_imports"], cov["licensed"],
-                                    searched, disc, gated_html)
-    return ("<!doctype html><meta charset='utf-8'><title>EGC Pulse Report</title>"
-            "<style>@import url('https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Noto+Serif:wght@400;600&display=swap');"
-            "body{font-family:'Lato',system-ui,Arial,sans-serif;color:#111;max-width:820px;margin:32px auto;padding:0 20px}"
-            "h1,h3{font-family:'Noto Serif',Georgia,serif;font-weight:600}.kpi{display:inline-block;border:1px solid #ddd;border-radius:8px;padding:8px 14px;margin:4px 8px 4px 0}"
-            ".kpi b{font-size:22px;display:block}td{padding:3px 12px;border-bottom:1px solid #eee}.muted{color:#777}ul{line-height:1.6}</style>"
-            "<p class='muted' style='margin-bottom:2px;letter-spacing:.08em;text-transform:uppercase;font-size:11px'>EGC Pulse. Social Listening Report</p>"
-            "<h1 style='margin:0 0 2px'>%s</h1><p class='muted'>Tracked term: <b>%s</b> · %s to %s · Generated %s</p>"
-            "<div><span class='kpi'><b>%s</b>mentions</span><span class='kpi'><b>%+d</b>net sentiment</span>"
-            "<span class='kpi'><b>%d%%</b>positive</span><span class='kpi'><b>%d</b>sources</span></div>"
-            "<h3>Sentiment</h3><p>Positive %d%% · Neutral %d%% · Negative %d%%</p>"
-            "%s"
-            "<h3>Mentions by source</h3><table>%s</table><h3>Top mentions</h3><ol>%s</ol>"
-            "<p class='muted'>Internal use only. Not for resale or redistribution. Source access depends on "
-            "configured APIs, connected accounts, licensed providers, approved research access, or lawful manual "
-            "import. Generated by EGC Pulse. Print, then Save as PDF.</p>") % (
-        e(proj), e(keyword or "all keywords"), ymd(start, "earliest"), ymd(end, "now"), ymd(now_iso()),
-        "{:,}".format(k["totalMentions"]), k["netSentiment"], k["positivePct"], k["platforms"],
-        round(100 * s["positive"] / tot), round(100 * s["neutral"] / tot), round(100 * s["negative"] / tot),
-        cov_html, plat, feed)
 
 
 def _pptx_filename(project=None):
@@ -1312,12 +1242,16 @@ def run_job(jid):
         return
     try:
         j["status"] = "running"
-        start = _clamp_recent(j["start"], j["end"], 30) if j["mode"] == "fast" else j["start"]
+        # Honor the user's selected range exactly so date filtering is accurate.
+        # YouTube (publishedAfter/Before) and open-web (Brave freshness) each scope
+        # the whole range in one request, so no clamp is needed. Fast mode just caps
+        # how far back we'll reach in one pass to keep it responsive.
+        start = j["start"] if j["mode"] != "fast" else _clamp_recent(j["start"], j["end"], 120)
         end = j["end"]
         live = pam.get_live_collectors()
         # Prioritize YouTube and TikTok (open-web discovery leads with the TikTok query)
         # as the primary sources: collect and analyze them first, then the rest.
-        _PRIO = {"youtube_official_api": 0, "open_web_social_discovery": 1}
+        _PRIO = {"youtube_official_api": 0, "open_web_social_discovery": 1, "wikipedia_public_api": 2}
         live.sort(key=lambda s: _PRIO.get(s.key, 5))
         j["skipped_sources"] = _skipped_sources()
         if not live:
@@ -1351,12 +1285,10 @@ def run_job(jid):
                     rate = rate or ("429" in msg or "rate" in msg.lower())
                     j["errors"].append({"source": src.key, "error": msg[:140]})
             got = pam.dedupe(got)
-            # Open-web discovery results are already term-scoped by the search provider
-            # (e.g. site:tiktok.com "term"), so trust them; only re-filter API sources
-            # (YouTube/Bluesky/etc.) whose results can be loosely related. The URL is
-            # included in the relevance text so term-in-handle/path matches count.
-            rel = [r for r in got if (r.get("platform") == "open_web"
-                   or is_relevant((r.get("content") or "") + " " + (r.get("author") or "") + " " + (r.get("url") or ""), [term]))]
+            # Uniform whole-word brand-context gate across every source so YouTube/
+            # Reddit/X get the same disambiguation open-web already had (rejects
+            # substring-only and loosely-related hits).
+            rel = [r for r in got if term_in_record(r, term)]
             ctx = {"source_key": src.key, "access_path": src.access_path.value, "run_id": jid, "source_name": src.display_name}
             pid = j.get("project")
             for r in rel:
@@ -1487,13 +1419,6 @@ def test_connection(key):
     return done(False, "Unknown source.")
 
 
-def _coverage_from_data(mentions):
-    from collections import Counter
-    by_plat = Counter(m.get("platform") for m in mentions)
-    return [{"display_name": s.display_name, "platform": s.platform, "status": s.status.value,
-             "kept": by_plat.get(s.platform, 0)} for s in pam.get_live_collectors()]
-
-
 def app_mode():
     return os.getenv("APP_MODE") or ("production" if os.getenv("RENDER") else "local")
 
@@ -1512,6 +1437,7 @@ def public_config():
         "sources": pam.platform_summary(),
         "live_sources": [s.key for s in pam.get_live_collectors()],
         "discovery": _discovery_status_public(),
+        "wikipedia": wm.status(),
     }
 
 
@@ -1626,10 +1552,15 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/projects/create":
             name = one("name") or (self._json_body().get("name") if self.headers.get("Content-Length") else None)
             return self._send({"project": create_project(name), "projects": list_projects()})
-        if u.path == "/api/projects/rename":
-            body = self._json_body()
-            ok = rename_project(one("id") or body.get("id"), one("name") or body.get("name"))
-            return self._send({"ok": ok, "projects": list_projects()})
+        if u.path == "/api/wikipedia/recommendation":
+            # Compliant Wikipedia UPDATE RECOMMENDATION: returns a neutral, cited,
+            # disclosure-carrying talk-page request DRAFT for human review. This
+            # endpoint never edits Wikipedia (no edit code exists in the product).
+            if not wm.monitor_enabled():
+                return self._send({"rejected": True, "errors": [
+                    "Wikipedia support is disabled (WIKIPEDIA_MONITOR_ENABLED=false)."]}, 403)
+            rec = wm.build_update_recommendation(self._json_body())
+            return self._send(rec, 200 if not rec.get("rejected") else 400)
         if u.path == "/api/projects/delete":
             pid = one("id") or self._json_body().get("id")
             ok = delete_project(pid)

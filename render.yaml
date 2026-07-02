@@ -24,9 +24,17 @@ services:
       - key: SEARCH_API_KEY
         sync: false
       # YouTube Data API v3 (live source). Free Google API key with YouTube Data
-      # API v3 enabled. With these keys set, YouTube + open-web discovery are the live sources.
+      # API v3 enabled. With these keys set, YouTube + open-web discovery are live.
       - key: YOUTUBE_API_KEY
         sync: false
+      # Wikipedia monitoring (keyless official MediaWiki API; read-only, update
+      # support is draft/talk-page recommendations only — Pulse never edits).
+      - key: WIKIPEDIA_MONITOR_ENABLED
+        value: "true"
+      - key: WIKIPEDIA_USER_AGENT
+        value: "EGC-Pulse/1.0 (Wikipedia monitoring; ChristopherC@egcgroup.com)"
+      - key: WIKIPEDIA_UPDATE_MODE
+        value: "draft_only"
       # Secrets — Render prompts for these; never stored in the repo. Leave blank
       # to keep that source honestly gated (the app still runs on keyless sources).
       - key: REDDIT_CLIENT_ID
@@ -57,7 +65,7 @@ services:
         sync: false
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PAID / PERSISTENT (keeps collected data; needs a card, ~$7/mo):
+# PAID / PERSISTENT (keeps collected data across restarts; needs a card, ~$7/mo):
 #   1. change `plan: free` to `plan: starter`
 #   2. add under the service (same indent as `envVars:`):
 #        disk:

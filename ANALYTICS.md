@@ -46,8 +46,10 @@ term (or all terms) and the start/end date range. The backend reference is
 ### 2.1 Mentions
 `totalMentions` = count of stored mention rows in scope. A "mention" is one
 public item (a video, post, or page) that matched a tracked term through a
-compliant search. De-duplicated on ingest by a content hash so the same item is
-not counted twice.
+compliant search. De-duplicated on ingest both by identity
+(platform + post id + keyword, scoped per project) and by a content hash (same
+content under different URLs, e.g. a syndicated article), so the same item is not
+counted twice.
 
 ### 2.2 Engagement
 `totalEngagement` = `SUM(engagement)` across in-scope mentions, where each row's
@@ -190,8 +192,8 @@ directly comparable.
 
 ## 4. Reporting methodology (how it rolls up)
 
-1. **Collection** fetches public items per live source, de-dupes on content hash,
-   classifies sentiment, and stores per-row engagement and views.
+1. **Collection** fetches public items per live source, de-dupes by identity and
+   content hash, classifies sentiment, and stores per-row engagement and views.
 2. **Scope filter** applies the term + date range to every query.
 3. **Aggregation** computes the section-2 metrics in a single pass over the
    in-scope rows.

@@ -230,7 +230,8 @@ def collect_youtube(term, start=None, end=None, limit=50):
     if not key:
         return []
     params = {"key": key, "q": term, "part": "snippet", "type": "video",
-              "order": "date", "maxResults": max(1, min(int(limit or 50), 50))}
+              "order": "date", "maxResults": max(1, min(int(limit or 50), 50)),
+              "regionCode": "US", "relevanceLanguage": "en"}   # US-localized results
     if start:
         params["publishedAfter"] = _iso_from_date(start)
     if end:

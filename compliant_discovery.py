@@ -60,12 +60,7 @@ _DOMAIN_PLATFORM = [
     ("threads", ["threads.net"]),
     ("linkedin", ["linkedin.com"]),
 ]
-_PLATFORM_DISP = {"tiktok": "TikTok", "instagram": "Instagram", "facebook": "Facebook",
-                  "x": "X / Twitter", "youtube": "YouTube", "reddit": "Reddit",
-                  "threads": "Threads", "linkedin": "LinkedIn"}
-
 _HASHTAG_RE = re.compile(r"#([A-Za-z0-9_]{2,50})")
-_URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.I)
 
 
 def extract_platform_from_url(url):
@@ -83,15 +78,6 @@ def extract_hashtags_from_text(text):
         if k not in seen:
             seen.add(k)
             out.append("#" + h)
-    return out
-
-
-def extract_known_social_urls(text):
-    out = []
-    for u in _URL_RE.findall(text or ""):
-        u = u.rstrip(".,);]")
-        if extract_platform_from_url(u):
-            out.append(u)
     return out
 
 
@@ -197,12 +183,17 @@ def result_has_brand_context(result, term):
     url_path = re.sub(r"^https?://[^/]+", "", (result.get("url") or ""))
     hay = " ".join([result.get("title") or "", result.get("description") or "",
                     result.get("snippet") or "", url_path]).lower()
-    if term in hay:
+    # Whole-word match so a short brand term does not match unrelated words it is a
+    # substring of (e.g. "jovia" must NOT match "jovial"/"Jovian"/"Jupiter's moons").
+    def _has(w):
+        return re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])", hay) is not None
+    t = term[1:] if term.startswith("#") else term
+    if _has(t):
         return True
-    words = [w for w in re.split(r"[^a-z0-9]+", term) if len(w) > 2]
+    words = [w for w in re.split(r"[^a-z0-9]+", t) if len(w) > 2]
     if not words:
-        return term in hay
-    return sum(1 for w in words if w in hay) >= max(1, (len(words) + 1) // 2)
+        return _has(t)
+    return sum(1 for w in words if _has(w)) >= max(1, (len(words) + 1) // 2)
 
 
 def classify_result_type(url, title="", description=""):
@@ -349,22 +340,43 @@ def _parse_search_results(data):
         candidates = data["web"].get("results", [])            # Brave
     elif isinstance(data.get("webPages"), dict):
         candidates = data["webPages"].get("value", [])         # Bing
-    elif isinstance(data.get("organic_results"), list):
-        candidates = data["organic_results"]                   # SerpAPI
-    elif isinstance(data.get("items"), list):
-        candidates = data["items"]                             # Google CSE
     elif isinstance(data.get("results"), list):
-        candidates = data["results"]                           # generic
+        candidates = data["results"]                           # generic custom endpoint
     for it in candidates:
         if not isinstance(it, dict):
             continue
         url = it.get("url") or it.get("link") or it.get("href")
         if not url:
             continue
+        # Provider-supplied publish/index date when available (Brave: page_age;
+        # Bing: datePublished/dateLastCrawled). Used for real date filtering.
+        raw_date = (it.get("page_age") or it.get("age") or it.get("datePublished")
+                    or it.get("dateLastCrawled") or it.get("date") or "")
         out.append({"title": it.get("title") or it.get("name") or "",
                     "url": url,
-                    "snippet": it.get("snippet") or it.get("description") or it.get("content") or ""})
+                    "snippet": it.get("snippet") or it.get("description") or it.get("content") or "",
+                    "date": _parse_date(raw_date)})
     return out
+
+
+def _parse_date(s):
+    """Normalize a provider date to YYYY-MM-DD, or '' if not a real date. Handles ISO
+    datetimes and plain dates; ignores relative strings like '2 days ago'."""
+    s = str(s or "").strip()
+    m = re.search(r"(\d{4})-(\d{2})-(\d{2})", s)
+    return m.group(0) if m else ""
+
+
+# Long Island / NYC / tri-state relevance signals (for US-localized ranking).
+_LOCAL_RE = re.compile(
+    r"\b(long\s*island|nassau\s+county|suffolk\s+county|new york|nyc|brooklyn|queens|"
+    r"manhattan|the bronx|staten island|hamptons|montauk|tri[\s-]?state|garden city|"
+    r"hempstead|huntington|babylon|islip|long beach|mineola|hicksville|new hyde park)\b", re.I)
+
+
+def local_score(text):
+    """Higher when the text signals Long Island / NYC / tri-state relevance."""
+    return len(_LOCAL_RE.findall(text or ""))
 
 
 _LAST_SEARCH_ERROR = ""  # last provider error (e.g. quota), surfaced to the UI/sweep
@@ -387,7 +399,8 @@ def search_provider_query(query, count=8, start=None, end=None):
     if provider == "brave":
         endpoint = endpoint or "https://api.search.brave.com/res/v1/web/search"
         headers["X-Subscription-Token"] = key
-        params = {"q": query, "count": min(count, 20)}
+        # US-scoped results (country + English) so research is localized, not global.
+        params = {"q": query, "count": min(count, 20), "country": "us", "search_lang": "en"}
         if fresh:
             params["freshness"] = fresh
     elif provider == "bing":
@@ -450,12 +463,12 @@ def normalize_open_web_reference(result, term=None):
     title = _clean_text(result.get("title") or result.get("name") or "")
     description = extract_best_description(result)
     content = title or description or _domain(url) or url   # headline; description carries the body
-    # Discovery never requests freshness, and a search provider's crawl/index date is
-    # not a reliable POST date. Leave posted_at empty so ingest dates the row by
-    # collected_at; the feed then honestly marks the date source as "collected".
+    # Use the provider's real publish/index date when supplied (so date filtering is
+    # accurate); otherwise leave empty and ingest dates the row by collected_at.
+    posted = result.get("date") or None
     return {"platform": "open_web", "platform_post_id": url or _short_id(title),
             "author": _domain(url), "content": content, "description": description, "url": url,
-            "posted_at": None,
+            "posted_at": posted,
             "engagement": 0, "hashtags": extract_hashtags_from_text(title + " " + description),
             "source_mode": classify_discovered_url(url),
             "result_type": classify_result_type(url, title, description)}
@@ -491,29 +504,13 @@ def enrich_known_urls(urls, term=None):
     return {"records": records, "accepted": accepted, "rejected": rejected}
 
 
-def source_truth_for_discovery(result):
-    """Honest source-truth facts for a discovered result (used in tests/docs).
-    The live pipeline applies these via source_truth using source_mode."""
-    url = result.get("url") or result.get("link") or ""
-    mode = result.get("source_mode") or classify_discovered_url(url)
-    plat = extract_platform_from_url(url)
-    discussed = [_PLATFORM_DISP[plat]] if plat in _PLATFORM_DISP else []
-    if mode == "tiktok_oembed_known_url":
-        return {"source_mode": mode, "searched_platform": "known TikTok URL enrichment",
-                "display_platform": "TikTok URL", "discussed_platforms": discussed or ["TikTok"],
-                "direct_platform_data": False, "coverage_type": "known_url_enrichment",
-                "coverage_note": "TikTok oEmbed enriches a known public video URL. It does not perform TikTok keyword search."}
-    return {"source_mode": mode, "searched_platform": "open web", "display_platform": "News",
-            "discussed_platforms": discussed, "direct_platform_data": False,
-            "coverage_type": "open_web_reference",
-            "coverage_note": "This is an open web result referencing a platform. It is not direct platform data."}
-
-
 # ── the collector wired into the access ladder (gated unless configured) ─────
-def collect_open_web_discovery(term, start=None, end=None, limit=24, hashtags=None, enrich_oembed=True):
-    """Run controlled open-web discovery queries via the configured search
-    provider. Enriches discovered TikTok video URLs via official oEmbed. Returns
-    [] when no search provider is configured (the source stays gated)."""
+def collect_open_web_discovery(term, start=None, end=None, limit=24, hashtags=None, enrich_oembed=True, historical=False):
+    """Run controlled open-web discovery queries via the configured search provider.
+    Date-scoped to [start, end] via the provider's freshness param (unless
+    historical=True), drops results dated outside the window, enriches discovered
+    TikTok video URLs via official oEmbed, and ranks US-local (Long Island/NYC) and
+    newest first. Returns [] when no search provider is configured (source gated)."""
     global _LAST_SEARCH_ERROR, _LAST_DISCOVERY_DIAG
     if not search_provider_configured():
         return []
@@ -521,21 +518,28 @@ def collect_open_web_discovery(term, start=None, end=None, limit=24, hashtags=No
     if not queries:
         return []
     _LAST_SEARCH_ERROR = ""
-    diag = {"provider_results": 0, "rejected_profile": 0, "rejected_low_context": 0, "accepted": 0}
-    per = max(3, limit // max(len(queries), 1))
+    diag = {"provider_results": 0, "rejected_profile": 0, "rejected_low_context": 0,
+            "rejected_stale": 0, "accepted": 0}
+    # Brave bills per request, not per result, so over-fetch within each request
+    # (count<=20) for better ranking without extra quota cost.
+    per = min(20, max(8, (limit * 2) // max(len(queries), 1)))
+    fstart, fend = (None, None) if historical else (start, end)
     seen, out = set(), []
     for q in queries:
-        # No recency/date restriction on discovery: we want the brand's evergreen
-        # social footprint. TikTok / Instagram / Facebook pages are rarely
-        # date-stamped, so a search-provider freshness filter drops them entirely.
-        # Results are stored with the collection date and filtered by range at
-        # display time, so date scoping still applies to what the user sees.
-        for r in search_provider_query(q, count=per):
+        for r in search_provider_query(q, count=per, start=fstart, end=fend):
             diag["provider_results"] += 1
             url = r.get("url") or ""
             if not url or url in seen:
                 continue
             seen.add(url)
+            # Hard date guard for a bounded range: a result whose provider date is
+            # outside the window is stale, AND a result with NO real date cannot be
+            # proven in-range, so both are dropped (unless historical is requested).
+            # This guarantees a bounded range never surfaces out-of-window content.
+            rd = r.get("date") or ""
+            if start and end and not historical and (not rd or not (start <= rd <= end)):
+                diag["rejected_stale"] += 1
+                continue
             reason = reject_low_value_result(r, term)   # drop profiles / tag-pages / empty / no-context
             if reason:
                 diag[reason] = diag.get(reason, 0) + 1
@@ -559,9 +563,14 @@ def collect_open_web_discovery(term, start=None, end=None, limit=24, hashtags=No
                     rec["result_type"] = "web_article"
             diag["accepted"] += 1
             out.append(rec)
-            if len(out) >= limit:
-                _LAST_DISCOVERY_DIAG = diag
-                return out
+    # Rank US-local (Long Island / NYC / tri-state) first, then newest, so the cap
+    # keeps the most relevant and actionable results.
+    # Local-first but bounded (cap at 2) so a single local signal + newest beats an
+    # old keyword-stuffed page; recency is the strong secondary key.
+    out.sort(key=lambda x: (min(local_score((x.get("content") or "") + " " + (x.get("description") or "")
+                                             + " " + (x.get("url") or "")), 2),
+                            x.get("posted_at") or ""), reverse=True)
+    out = out[:limit]
     _LAST_DISCOVERY_DIAG = diag
     if not out and _LAST_SEARCH_ERROR:
         raise RuntimeError(_LAST_SEARCH_ERROR)

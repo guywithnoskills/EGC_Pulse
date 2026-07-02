@@ -26,6 +26,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import compliant_connectors as cc
 import compliant_discovery as cd
+import wikipedia_monitor as wm
 
 
 class SourceStatus(str, Enum):
@@ -397,6 +398,18 @@ CAPABILITY_MATRIX: Dict[str, ConnectorCapability] = {
         SourceStatus.LIVE, (HistoricalMode.RECENT_ONLY,), "None (GDELT)",
         allowed_data_types=("news_articles", "domain", "lang", "url"), date_range_support="recent window",
         max_historical_lookback="Rolling recent window.", coverage_template="Global news (GDELT), recent window."),
+    # Wikipedia revision monitoring: official MediaWiki API, keyless, READ-ONLY.
+    # Update support is draft/talk-page recommendations only (wikipedia_monitor.py);
+    # there is no code path that edits Wikipedia. Toggle: WIKIPEDIA_MONITOR_ENABLED.
+    "wikipedia_public_api": _C("wikipedia_public_api", "wikipedia", "Wikipedia", AccessPath.OFFICIAL_API,
+        SourceStatus.LIVE, (HistoricalMode.OFFICIAL_ARCHIVE,), "None (official MediaWiki API)",
+        allowed_data_types=("revision_metadata", "page_title", "editor", "edit_summary", "diff_url", "timestamps"),
+        date_range_support="revision history scoped to the range (rvstart/rvend); newest revisions first, capped per collect",
+        max_historical_lookback="Any historical window via the official API (newest N revisions per page per run).",
+        rate_limits="Wikimedia etiquette: low volume, maxlag, descriptive User-Agent (WIKIPEDIA_USER_AGENT).",
+        coverage_template="Wikipedia page-revision monitoring via the official MediaWiki API. Read-only: "
+                          "Pulse never edits Wikipedia. Update support produces neutral, cited, "
+                          "disclosure-carrying talk-page request drafts for human review only."),
     # Compliant open-web discovery: finds public pages that reference a platform.
     # Gated until a search provider API is configured (SEARCH_PROVIDER + SEARCH_API_KEY).
     "open_web_social_discovery": _C("open_web_social_discovery", "open_web", "Open web social discovery", AccessPath.OFFICIAL_API,
@@ -414,6 +427,7 @@ CAPABILITY_MATRIX: Dict[str, ConnectorCapability] = {
 FETCHERS = {
     "reddit_official_api": cc.collect_reddit,
     "youtube_official_api": cc.collect_youtube,
+    "wikipedia_public_api": wm.collect_wikipedia,
     "x_recent_search": cc.collect_x,
     "x_full_archive": cc.collect_x,
     "mastodon_public_api": cc.collect_mastodon,
@@ -467,6 +481,10 @@ def resolve_source(cap: ConnectorCapability) -> ResolvedSource:
 HIDDEN_SOURCE_KEYS = {"mastodon_public_api", "lemmy_public_api", "nostr_public_relays",
                       "peertube_public_search", "hackernews_public_api", "news_gdelt",
                       "bluesky_public_api"}
+if not wm.monitor_enabled():
+    # WIKIPEDIA_MONITOR_ENABLED=false removes Wikipedia from the product (cards,
+    # collection, counts) exactly like the retired open-network sources.
+    HIDDEN_SOURCE_KEYS = HIDDEN_SOURCE_KEYS | {"wikipedia_public_api"}
 
 
 def get_source_matrix() -> List[ResolvedSource]:
@@ -525,10 +543,11 @@ def collect(source_key: str, term: str, start: Optional[str] = None, end: Option
     fn = FETCHERS.get(source_key)
     if not fn:
         return []
-    try:
-        return fn(term, start, end) or []
-    except Exception:
-        return []
+    # Fetcher errors (e.g. a classified 429) propagate so callers can record them
+    # honestly: run_job logs them into the job's errors + rate-limited status, and
+    # the sync collect() path guards each call itself. Swallowing them here made a
+    # rate-limited source indistinguishable from "no results in this range".
+    return fn(term, start, end) or []
 
 
 def build_coverage_for_run(source: ResolvedSource, requested_start: Optional[str],

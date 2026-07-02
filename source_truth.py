@@ -87,6 +87,10 @@ SOURCE_TRUTH = {
     "youtube_official_api": dict(sp="youtube", disp="YouTube", searched="youtube data api v3",
                                  ct=DIRECT_OFFICIAL, conf="source_verified_direct_platform",
                                  note="YouTube Data API v3 video result. Direct platform data (recency-oriented)."),
+    "wikipedia_public_api": dict(sp="wikipedia", disp="Wikipedia", searched="mediawiki revisions api",
+                                 ct=DIRECT_OFFICIAL, conf="source_verified_direct_platform",
+                                 note="Official MediaWiki API revision metadata. Read-only monitoring; "
+                                      "Pulse never edits Wikipedia articles."),
     "x_recent_search": dict(sp="x", disp="X / Twitter", searched="x recent search",
                             ct=DIRECT_OFFICIAL, conf="source_verified_direct_platform",
                             note="X recent-search result. Direct platform data (last ~7 days)."),
