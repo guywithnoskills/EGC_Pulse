@@ -745,7 +745,7 @@ def recent(limit=25, keyword=None, platform=None, sentiment=None, start=None, en
     args.append(limit)
     with db() as c:
         return [dict(r) for r in c.execute(
-            "SELECT platform, keyword, author, content, description, result_type, url, posted_at, posted_date, ingested_at, "
+            "SELECT platform, platform_post_id, keyword, author, content, description, result_type, url, posted_at, posted_date, ingested_at, "
             "sentiment, engagement, reach, "
             "display_platform, source_platform, searched_platform, discussed_platforms, direct_platform_data, "
             "platform_coverage_type, coverage_label, coverage_note, source_key, confidence_level "
@@ -801,6 +801,18 @@ def report_pptx(keyword=None, start=None, end=None, project=None):
     cov = m["coverage"]
     proj = project_name(project)
 
+    # Findings inputs (mirror the dashboard Findings bar). recent() is deduped +
+    # date/project scoped, so no fabricated or double-counted numbers.
+    rows = recent(300, keyword, None, None, start, end, project)
+    wiki_rows = [r for r in rows if r.get("platform") == "wikipedia"]
+
+    def _wiki_high(r):
+        mt = re.search(r"Risk:\s*([^.]*)\.", r.get("description") or "", re.I)
+        seg = (mt.group(1).lower() if mt else "")
+        return bool(seg) and seg != "none detected" and re.search(r"vandal|major content removal|citation", seg)
+    wiki_high = [r for r in wiki_rows if _wiki_high(r)]
+    newest = max((r.get("posted_at") or r.get("posted_date") or "" for r in rows), default="")
+
     # Dashboard palette (kept in sync with dashboard.html tokens).
     DARK = RGBColor(0x19, 0x1A, 0x1D)
     PANEL = RGBColor(0x21, 0x23, 0x29)
@@ -814,10 +826,19 @@ def report_pptx(keyword=None, start=None, end=None, project=None):
     NEG = RGBColor(0xE5, 0x5B, 0x4C)
     FONT = "Lato"
 
-    def ymd(d):
+    _MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    def ymd(d):   # human, e.g. "Jul 2, 2026"
         try:
             y, mo, da = (d or "")[:10].split("-")
-            return y[2:] + "/" + mo + "/" + da
+            return "%s %d, %s" % (_MON[int(mo) - 1], int(da), y)
+        except Exception:
+            return d or ""
+
+    def ymd_short(d, monthly=False):   # compact axis label, e.g. "Jun 2" or "Jun 2026"
+        try:
+            y, mo, da = (d or "")[:10].split("-")
+            return "%s %s" % (_MON[int(mo) - 1], y) if monthly else "%s %d" % (_MON[int(mo) - 1], int(da))
         except Exception:
             return d or ""
 
@@ -828,7 +849,7 @@ def report_pptx(keyword=None, start=None, end=None, project=None):
             d0 = datetime.strptime(start[:10], "%Y-%m-%d").date()
             d1 = datetime.strptime(end[:10], "%Y-%m-%d").date()
             n = (d1 - d0).days + 1
-            return "%s to %s   ·   %d day%s" % (ymd(start), ymd(end), n, "" if n == 1 else "s")
+            return "%s to %s   (%d day%s)" % (ymd(start), ymd(end), n, "" if n == 1 else "s")
         except Exception:
             return ymd(start) + " to " + ymd(end)
 
@@ -838,12 +859,12 @@ def report_pptx(keyword=None, start=None, end=None, project=None):
         series = series or []
         days = len(series)
         if days <= 16:
-            return [ymd(p["t"]) for p in series], [p["value"] for p in series], "Daily"
+            return [ymd_short(p["t"]) for p in series], [p["value"] for p in series], "Daily"
         if days <= 120:
             labels, vals = [], []
             for i in range(0, days, 7):
                 chunk = series[i:i + 7]
-                labels.append(ymd(chunk[0]["t"]))
+                labels.append(ymd_short(chunk[0]["t"]))
                 vals.append(sum(p["value"] for p in chunk))
             return labels, vals, "Weekly"
         groups, order = {}, []
@@ -852,7 +873,7 @@ def report_pptx(keyword=None, start=None, end=None, project=None):
             if ym not in groups:
                 groups[ym] = 0; order.append(ym)
             groups[ym] += p["value"]
-        return [ym[2:].replace("-", "/") for ym in order], [groups[ym] for ym in order], "Monthly"
+        return [ymd_short(ym + "-01", monthly=True) for ym in order], [groups[ym] for ym in order], "Monthly"
 
     rng = daterange_label() if (start or end) else "all available dates"
 
@@ -903,6 +924,17 @@ def report_pptx(keyword=None, start=None, end=None, project=None):
             pass
         return sh
 
+    def egc_mark(sl, x, y, w):
+        """The EGC stepped-block brand mark (same geometry as the app), drawn to a
+        width of `w` inches at (x, y)."""
+        u = w / 48.0
+        for rx, ry, rw, rh, col in [(2, 2, 8, 40, INK), (14, 2, 26, 12, RGBColor(0x6F, 0x73, 0x7B)),
+                                    (14, 18, 15, 9, INK), (31, 17, 11, 12, RGBColor(0x56, 0x5A, 0x63)),
+                                    (13, 31, 22, 11, RGBColor(0xB9, 0xBD, 0xC5))]:
+            s = sl.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(x + rx * u), Inches(y + ry * u),
+                                    Inches(rw * u), Inches(rh * u))
+            s.fill.solid(); s.fill.fore_color.rgb = col; s.line.fill.background(); s.shadow.inherit = False
+
     def header(sl, title, sub=None):
         bar = sl.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0.7), Inches(0.52), Inches(0.12), Inches(0.66))
         bar.fill.solid(); bar.fill.fore_color.rgb = BLUE; bar.line.fill.background(); bar.shadow.inherit = False
@@ -930,15 +962,8 @@ def report_pptx(keyword=None, start=None, end=None, project=None):
 
     # Slide 1: title (the project name is the hero)
     sl = new_slide()
-    for dx, dy, c in [(0, 0, BLUE), (0.34, 0, RGBColor(0x2B, 0x57, 0xB0)),
-                      (0, 0.34, RGBColor(0x2B, 0x57, 0xB0)), (0.34, 0.34, RGBColor(0x4E, 0x53, 0x5C))]:
-        sq = sl.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.92 + dx), Inches(0.92 + dy), Inches(0.27), Inches(0.27))
-        sq.fill.solid(); sq.fill.fore_color.rgb = c; sq.line.fill.background(); sq.shadow.inherit = False
-        try:
-            sq.adjustments[0] = 0.26
-        except Exception:
-            pass
-    text(sl, 1.62, 0.93, 9.5, 0.4, [("EGC PULSE      ·      SOCIAL LISTENING REPORT", 12, FAINT, True)])
+    egc_mark(sl, 0.9, 0.86, 0.52)
+    text(sl, 1.72, 0.93, 9.5, 0.4, [("EGC PULSE      ·      SOCIAL LISTENING REPORT", 12, FAINT, True)])
     # hero: the project name, explicitly labeled so the deck identifies its project
     text(sl, 0.9, 2.18, 9.0, 0.32, [("PROJECT", 12, BLUE, True)])
     hero = proj[:70]
@@ -958,7 +983,53 @@ def report_pptx(keyword=None, start=None, end=None, project=None):
         card(sl, cx, y2, cw2, h2)
         text(sl, cx + 0.26, y2 + 0.27, cw2 - 0.45, 0.4, [(lab.upper(), 10, FAINT, True)])
         text(sl, cx + 0.24, y2 + 0.68, cw2 - 0.4, 0.7, [(val, 27, INK, True)])
-    text(sl, 0.9, SH - 0.58, 12.0, 0.4, [("Internal use only. Compliant, official-source listening. Generated " + now_iso()[:16].replace("T", " "), 10, FAINT, False)])
+    text(sl, 0.9, SH - 0.58, 12.0, 0.4, [("Internal use only. Compliant, official-source listening. Generated " + ymd(now_iso()), 10, FAINT, False)])
+
+    # Slide 2: executive summary + key findings + recommendations
+    sl = new_slide()
+    header(sl, "Executive summary", "Plain-language read of the results for %s." % rng)
+    net = k["netSentiment"]
+    tilt = "positive" if net > 5 else ("negative" if net < -5 else "balanced")
+    if k["totalMentions"]:
+        wtail = ("%d Wikipedia revision%s monitored on the entity's page" %
+                 (len(wiki_rows), "" if len(wiki_rows) == 1 else "s")) if wiki_rows else \
+                "no Wikipedia revisions in range"
+        summary = ("Across %s, %s recorded %s mention%s (%d%% positive, net sentiment %s%d), "
+                   "with %s." % (rng, proj, "{:,}".format(k["totalMentions"]),
+                                 "" if k["totalMentions"] == 1 else "s", k.get("positivePct", 0),
+                                 "+" if net > 0 else "", net, wtail))
+    else:
+        summary = ("No mentions were collected for %s in %s. Add a tracked term and run Collect, "
+                   "or widen the date range." % (proj, rng))
+    card(sl, 0.7, 1.55, SW - 1.4, 1.5)
+    text(sl, 0.95, 1.72, SW - 1.9, 1.2, [(summary, 14, INK, False)])
+    # key findings (left) + recommended actions (right)
+    def _plat(k2):
+        for sp in m.get("platformStats", []):
+            if sp["key"] == k2:
+                return sp
+        return {"mentions": 0}
+    finds = [
+        "%s total mentions, %d%% positive (net %s%d)." % ("{:,}".format(k["totalMentions"]), k.get("positivePct", 0), "+" if net > 0 else "", net),
+        "Source mix: TikTok %d, YouTube %d, News %d." % (_plat("tiktok")["mentions"], _plat("youtube")["mentions"], _plat("news")["mentions"]),
+        "%d Wikipedia change%s monitored%s." % (len(wiki_rows), "" if len(wiki_rows) == 1 else "s",
+                                                (", %d high-risk" % len(wiki_high)) if wiki_high else ""),
+        "Newest activity: %s." % (ymd(newest) if newest else "none in range"),
+        "Estimated audience reached: %s (est.)." % _fmt_n(k.get("totalReach", 0)),
+    ]
+    recs = []
+    if wiki_high:
+        recs.append("Review %d high-risk Wikipedia change%s; if a correction is warranted, prepare a neutral, cited talk-page request (draft-only, with disclosure)." % (len(wiki_high), "" if len(wiki_high) == 1 else "s"))
+    if net < -5:
+        recs.append("Sentiment skews %s; prioritize response and amplify positive coverage." % tilt)
+    recs.append("Amplify the newest high-reach content and keep monitoring TikTok, YouTube and News.")
+    recs.append("Wikipedia updates stay draft/review-first; Pulse never edits articles.")
+    card(sl, 0.7, 3.25, 6.0, 3.6)
+    text(sl, 0.95, 3.42, 5.5, 0.35, [("KEY FINDINGS", 11, FAINT, True)])
+    text(sl, 0.95, 3.86, 5.55, 2.9, [("•  " + f, 12.5, INK, False) for f in finds])
+    card(sl, 7.0, 3.25, SW - 7.7, 3.6)
+    text(sl, 7.25, 3.42, 5.0, 0.35, [("RECOMMENDED ACTIONS", 11, FAINT, True)])
+    text(sl, 7.25, 3.86, SW - 8.2, 2.9, [("•  " + r, 12.5, INK, False) for r in recs[:4]])
 
     # Slide 2: overview KPIs
     sl = new_slide()
@@ -1112,6 +1183,25 @@ def report_pptx(keyword=None, start=None, end=None, project=None):
                rows, BLUE, PANEL, LINE, INK, MUT, FONT, col_widths=[7.4, 1.8, 1.0, 1.7])
     else:
         text(sl, 0.95, 3.2, 11.0, 0.8, [("No mentions stored in this range.", 16, MUT, False)])
+
+    # Slide: Wikipedia watch (only when revisions were monitored in range)
+    if wiki_rows:
+        sl = new_slide()
+        header(sl, "Wikipedia watch", "Monitored page revisions, high-risk first. Read-only; Pulse never edits Wikipedia.")
+        ordered = wiki_high + [r for r in wiki_rows if r not in wiki_high]
+        trows = []
+        for r in ordered[:8]:
+            page = (r.get("platform_post_id") or "").split("#")[0]
+            mt = re.search(r"Risk:\s*([^.]*)\.", r.get("description") or "", re.I)
+            seg = (mt.group(1) if mt else "").strip()
+            risk = "High" if _wiki_high(r) else ("None" if (not seg or seg.lower() == "none detected") else "Review")
+            trows.append([page[:34], (r.get("author") or "unknown")[:20], ymd(r.get("posted_at")), risk])
+        _table(sl, 0.7, 1.7, SW - 1.4, 4.4, ["Page", "Editor", "When", "Risk"],
+               trows, BLUE, PANEL, LINE, INK, MUT, FONT, col_widths=[4.6, 3.0, 2.7, 1.6])
+        text(sl, 0.7, SH - 0.62, SW - 1.4, 0.4,
+             [("%d Wikipedia revision%s monitored%s. For a correction, prepare a neutral, cited talk-page request with paid/COI disclosure (draft-only)." % (
+                 len(wiki_rows), "" if len(wiki_rows) == 1 else "s",
+                 " · %d high-risk" % len(wiki_high) if wiki_high else ""), 10, FAINT, False)])
 
     # Slide 7: coverage & source truth
     sl = new_slide()

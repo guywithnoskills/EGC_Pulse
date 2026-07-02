@@ -223,15 +223,20 @@ def _record(title, rev, prev_size, term):
     else:
         diff_url = "https://en.wikipedia.org/w/index.php?oldid=%d" % revid   # page creation
     delta = (rev.get("size") or 0) - prev_size if prev_size is not None else None
-    bits = ["Revision %d (prev %d) by %s." % (revid, parentid, user),
-            ("Summary: %s." % comment) if comment else "Summary: none.",
-            ("Section: %s." % section) if section else "",
-            ("Size change: %+d bytes." % delta) if delta is not None else "",
-            ("Risk flags: %s." % ", ".join(flags)) if flags else "Risk flags: none detected."]
-    content = '%s · %s' % (title, (comment[:110] or ("edited by " + user)))
+    # Human-readable insight: who / what / where / size / risk. Leads with the risk
+    # level so it is scannable; "Risk: ..." is machine-parseable by the UI badge.
+    who = user + (" (anonymous editor)" if rev.get("anon") else "")
+    where = ("the %s section" % section) if section else "the article"
+    size = (" (%s%d bytes)" % ("+" if delta >= 0 else "", delta)) if delta is not None else ""
+    summary = (' Summary: "%s".' % comment) if comment else " No edit summary provided."
+    risk = ", ".join(flags) if flags else "none detected"
+    bits = ["%s edited %s%s.%s Risk: %s." % (who, where, size, summary, risk)]
+    if any("citation" in f for f in flags):
+        bits.append("A citation may have been removed.")
+    content = "%s: %s" % (title, (comment[:110] or ("edited by " + user)))
     return {"platform": "wikipedia", "platform_post_id": "%s#%d" % (title, revid),
             "author": user, "content": content,
-            "description": " ".join(b for b in bits if b),
+            "description": " ".join(bits),
             "url": diff_url, "posted_at": ts, "engagement": 0, "reach": 0,
             "result_type": "wikipedia_revision", "hashtags": [],
             "_risk": len(flags), "_page": title}

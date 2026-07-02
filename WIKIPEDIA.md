@@ -1,5 +1,38 @@
 # Wikipedia monitoring and compliant update support
 
+## Insights, findings, and the draft action (v11 refinements)
+- **Wikipedia insights** render on each revision row: who edited, what section, size
+  change, and a risk level (No risk flags / Review / High-risk) derived from
+  heuristic flags (vandalism-like, major removal, citation removal, negative/
+  unsourced, COI-sensitive, anonymous). Timestamps show as "Jul 2, 2026, 3:45 PM".
+- **The "edit" wording is gone.** The revision chip now reads "Wikipedia change"
+  (a monitored change, not an edit action). The compliant draft action is a
+  clearly-labeled "Draft talk-page request" (per row) and "Prepare talk-page
+  request" (on the Wikipedia source card). Both open a draft-only composer with the
+  microcopy "Draft-only. Does not publish to Wikipedia." It calls
+  `/api/wikipedia/recommendation`; `update_mode` stays `draft_only`, `auto_edit`
+  stays false, and no code path edits Wikipedia.
+- **Findings bar** (top of Mentions): total mentions, high-risk count, Wikipedia
+  changes, source mix (TikTok / YouTube / News), newest item, and a recommended
+  action. It is computed from the deduped, filtered result set (no fabricated or
+  double-counted numbers) and updates with date/source/search filters.
+
+## Other v11 refinements
+- **Performance:** search input is debounced; the wasteful 25s idle full-refresh
+  was removed (live updates during a collection are driven by job polling);
+  `refresh()` coalesces rapid filter/preset/project switches so calls don't stack.
+- **Default Project:** a starter workspace bootstrapped on a fresh database, now
+  labeled "starter" with helper text; create your own from scratch with the +
+  button and delete Default anytime (the app keeps at least one project).
+- **EGC logo:** the stepped-block EGC brand mark renders in the rail and on the
+  PPT title slide (crisp inline SVG / drawn shapes; replace with the official EGC
+  asset if desired).
+- **PowerPoint:** clearer 10-slide deck with an Executive summary (key findings +
+  recommendations), a Wikipedia-watch slide (high-risk first) when revisions exist,
+  the EGC mark on the title, and human-readable dates throughout.
+- **Dates:** human-friendly everywhere ("Jul 2, 2026", ranges "Jun 2 to Jul 2,
+  2026"); no ambiguous numeric formats.
+
 ## What monitoring does
 Pulse monitors Wikipedia pages for client-relevant changes using ONLY the
 official MediaWiki Action API (keyless, read-only). A tracked term can be:
