@@ -565,6 +565,229 @@ STOPWORDS = set("the a an and or for to of in on at is are was be it this that w
                 "co will like dont been they that this with said were would people".split())
 
 
+# ── global hashtag discovery (across ALL projects), tri-state-biased ─────────
+# Hashtag search is GLOBAL by default: it looks across every project/brand in the
+# selected time frame and reports which brands are associated with the term. Results
+# carry a SILENT relevance bias toward the tri-state area (Long Island first) applied
+# in ranking only — there is no user-facing region filter.
+_HASHTAG_RE = re.compile(r"#(\w+)")
+
+
+def _camel_split(s):
+    # "LongIsland" -> "Long Island" so camel-case hashtags normalize like spaced text
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", s or "")
+
+
+def _collapse(s):
+    # canonical compact form: lowercase, camel-split, strip everything but a-z0-9
+    return re.sub(r"[^a-z0-9]+", "", _camel_split(s or "").lower())
+
+
+def _hashtag_query_forms(q):
+    """Return (canonical_compact, [words]). '#LongIsland', 'long island' and
+    'longisland' all yield canonical 'longisland'."""
+    q2 = _camel_split((q or "").replace("#", " "))
+    words = re.findall(r"[a-z0-9]+", q2.lower())
+    return "".join(words), words
+
+
+def _extract_hashtags(text):
+    """[(display_lower, canonical)] for every #tag literally present in text."""
+    return [(m.group(1).lower(), _collapse(m.group(1))) for m in _HASHTAG_RE.finditer(text or "")]
+
+
+def _match_text(r):
+    # Text we match the query/region against: what the public actually posted.
+    # Deliberately EXCLUDES `keyword` (the tracked brand term) so a brand tracked as
+    # e.g. "Long Island Bank" doesn't match #longisland on every one of its mentions.
+    return " ".join(str(r.get(k) or "") for k in ("content", "description", "author"))
+
+
+def _tag_text(r):
+    # Text we harvest #hashtags from: content/description only (author handles and the
+    # tracked keyword are not content hashtags).
+    return " ".join(str(r.get(k) or "") for k in ("content", "description"))
+
+
+def _matches_hashtag(text, canon, qwords):
+    """True if the query (already normalized to canon + qwords) appears in text as a
+    hashtag, a spaced phrase, or a compact token. Makes #LongIsland / long island /
+    longisland equivalent without merging unrelated words."""
+    if not canon:
+        return False
+    for _disp, tc in _extract_hashtags(text):          # 1) #hashtag token
+        if tc == canon:
+            return True
+    words = re.findall(r"[a-z0-9]+", (text or "").lower())
+    n = len(qwords)
+    if n:                                              # 2) exact consecutive phrase
+        for i in range(len(words) - n + 1):
+            if words[i:i + n] == qwords:
+                return True
+    if canon in words:                                 # 3) compact single token
+        return True
+    # 4) bridge spaced<->compact: a run of CONSECUTIVE WHOLE words concatenates exactly
+    #    to canon ("long island" <-> "longisland"), without matching inside unrelated
+    #    words ("prolongisland", "renewyorktimes" no longer false-match).
+    if len(canon) >= 6:
+        for i in range(len(words)):
+            acc = ""
+            for j in range(i, len(words)):
+                acc += words[j]
+                if len(acc) > len(canon):
+                    break
+                if acc == canon:
+                    return True
+    return False
+
+
+# SILENT regional relevance bias toward the tri-state area (Long Island first). This is a
+# default ranking/data-quality rule, NOT a user-facing filter — there are no region chips.
+# Higher tier = more relevant, so results naturally surface Long Island / tri-state first.
+_REGION_BIAS = [
+    (5, ["long island", "nassau", "suffolk", "hempstead", "montauk", "garden city",
+         "mineola", "riverhead", "islip", "huntington", "babylon", "smithtown"]),   # Long Island
+    (4, ["queens", "brooklyn", "astoria", "flushing", "bklyn"]),                     # LI-adjacent boroughs
+    (3, ["nyc", "new york city", "manhattan", "bronx", "staten island"]),           # NYC
+    (2, ["new york", "new york state", "tri-state", "tristate"]),                    # NY state / tri-state
+    (1, ["new jersey", "connecticut", "nj", "ct"]),                                  # rest of tri-state
+]
+
+
+def _region_score(text):
+    """Silent tri-state relevance score (0 = none, 5 = Long Island). Whole-word matched so
+    short tokens (nj/ct) don't match inside other words. Used only to rank results, never
+    to filter them and never surfaced as a control."""
+    low = " " + re.sub(r"[^a-z0-9]+", " ", (text or "").lower()) + " "
+    for score, terms in _REGION_BIAS:
+        for t in terms:
+            if (" " + t + " ") in low:
+                return score
+    return 0
+
+
+def _bucket_key(r):
+    """Same platform buckets the UI/backend use everywhere (keeps counts aligned)."""
+    if (r.get("display_platform") or "") == "TikTok URL":
+        return "tiktok"
+    p = r.get("platform")
+    if p == "youtube":
+        return "youtube"
+    if p == "wikipedia":
+        return "wikipedia"
+    return "news"
+
+
+_HASHTAG_SCAN_CAP = 20000   # max rows scanned per hashtag query; meta.truncated flags if hit
+_HASHTAG_COLS = ("platform, platform_post_id, keyword, author, content, description, result_type, url, "
+                 "posted_at, posted_date, ingested_at, sentiment, engagement, reach, "
+                 "display_platform, source_platform, searched_platform, discussed_platforms, direct_platform_data, "
+                 "platform_coverage_type, coverage_label, coverage_note, source_key, confidence_level, project_id")
+
+
+def hashtag_search(query, start=None, end=None, project=None, scope="all", brand=None, limit=400):
+    """Global hashtag/term discovery across every project in the time frame.
+
+    scope   'all' (default, every brand) | 'project' (the currently open project)
+    brand   optional project id to narrow to ONE brand (takes precedence over scope)
+    Results carry a SILENT tri-state/Long Island relevance bias in their ranking (see
+    _region_score) — there is NO user-facing region filter. Never silently restricts to
+    the open project: staying global requires no filter.
+    """
+    canon, qwords = _hashtag_query_forms(query)
+    narrow = None
+    if brand:
+        narrow = resolve_project(brand)
+    elif scope == "project" and project:
+        narrow = resolve_project(project)
+
+    clauses = ["is_hidden=0", "platform NOT IN (%s)" % ",".join("'%s'" % p for p in _HIDDEN_PLATFORMS)]
+    params = []
+    if narrow:
+        clauses.append("project_id = ?"); params.append(narrow)
+    if start:
+        clauses.append("posted_date >= ?"); params.append(start)
+    if end:
+        clauses.append("posted_date <= ?"); params.append(end)
+    where = " AND ".join(clauses)
+
+    pmap = {p["id"]: p["name"] for p in list_projects()}
+    with db() as c:
+        rows = [dict(r) for r in c.execute(
+            "SELECT " + _HASHTAG_COLS + " FROM mentions WHERE " + where +
+            " ORDER BY posted_at DESC LIMIT ?", params + [_HASHTAG_SCAN_CAP]).fetchall()]
+    truncated = len(rows) >= _HASHTAG_SCAN_CAP   # disclosed in meta so counts are never silently capped
+
+    # Available hashtags in this same time frame/scope (for the empty state). Social
+    # rows only — Wikipedia metadata tags are NOT hashtags (requirement 8).
+    avail = {}
+    for r in rows:
+        if r.get("platform") == "wikipedia":
+            continue
+        for disp, tc in _extract_hashtags(_tag_text(r)):
+            if not tc:
+                continue
+            slot = avail.setdefault(tc, {"tag": disp, "count": 0})
+            slot["count"] += 1
+    top_avail = [v for v in sorted(avail.values(), key=lambda x: -x["count"])[:12]]
+
+    meta = {"query": query or "", "canonical": canon, "scope": scope,
+            "brand": narrow,
+            "brandName": pmap.get(narrow) if narrow else None, "truncated": truncated}
+    if not canon:
+        return dict(meta, total=0, results=[], brands=[], topHashtags=top_avail)
+
+    matched, seen = [], set()
+    for r in rows:
+        text = _match_text(r)
+        if not _matches_hashtag(text, canon, qwords):
+            continue
+        # dedup a post that was stored more than once in a project (e.g. collected under
+        # two tracked terms) so a brand's count reflects distinct posts, not rows.
+        key = (r.get("project_id"), r.get("platform"), r.get("platform_post_id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        r["project_name"] = pmap.get(r.get("project_id"), "Unknown project")
+        matched.append(r)
+    # SILENT tri-state/Long Island relevance bias: rank region-relevant mentions first
+    # (recency as tiebreak) so they surface by default and survive the display cap. This is
+    # a default ranking rule only — no region filter and nothing user-selectable.
+    matched.sort(key=lambda r: (_region_score(_match_text(r)), r.get("posted_at") or ""), reverse=True)
+    total = len(matched)
+    results_out = matched[:limit]      # cap only the feed list; brand totals stay real below
+
+    # Brand association summary — counts from the FULL filtered, deduped set (never the
+    # display cap), so brand totals are real even when the results list is truncated.
+    bmap = {}
+    for r in matched:
+        pid = r.get("project_id")
+        b = bmap.get(pid)
+        if not b:
+            b = bmap[pid] = {"project_id": pid, "project_name": pmap.get(pid, "Unknown project"),
+                             "count": 0, "_tags": {}, "_src": {}, "newest": None}
+        b["count"] += 1
+        t = r.get("posted_at") or r.get("posted_date") or r.get("ingested_at")
+        if t and (not b["newest"] or t > b["newest"]):
+            b["newest"] = t
+        if r.get("platform") != "wikipedia":           # social hashtags only
+            for disp, tc in _extract_hashtags(_tag_text(r)):
+                if tc:
+                    b["_tags"][disp] = b["_tags"].get(disp, 0) + 1
+        sk = _bucket_key(r)
+        b["_src"][sk] = b["_src"].get(sk, 0) + 1
+    brands = []
+    for b in bmap.values():
+        tags = sorted(b["_tags"].items(), key=lambda x: -x[1])[:5]
+        srcs = sorted(b["_src"].items(), key=lambda x: -x[1])
+        brands.append({"project_id": b["project_id"], "project_name": b["project_name"],
+                       "count": b["count"], "newest": b["newest"],
+                       "topHashtags": [{"tag": k, "count": v} for k, v in tags],
+                       "topSources": [{"key": k, "count": v} for k, v in srcs]})
+    brands.sort(key=lambda x: (-x["count"], x["project_name"]))
+    return dict(meta, total=total, results=results_out, brands=brands, topHashtags=top_avail)
+
+
 # ── Analytics model (documented in ANALYTICS.md) ──────────────────────────────
 # Impressions = measured views/displays we actually receive from a platform API
 #   (YouTube viewCount; owned-account impressions when a Meta account is connected).
@@ -658,19 +881,27 @@ def metrics(keyword=None, start=None, end=None, project=None):
         # buttons: mentions, engagement, estimated reach, impressions, sentiment split.
         pstat = c.execute(
             # Bucket by the honest DISPLAY classification so the feed source tag, brand
-            # color, filter, and metrics all agree. 'TikTok URL' = oEmbed/known TikTok
-            # video references; News is the catch-all so buttons reconcile to total.
+            # color, filter, and metrics all agree. TikTok = oEmbed/known video refs;
+            # Wikipedia = monitored revisions (its own card, not audience content);
+            # News = the open-web catch-all. Together they reconcile to total.
             "SELECT CASE WHEN COALESCE(display_platform,'')='TikTok URL' THEN 'tiktok' "
             "WHEN platform='youtube' THEN 'youtube' "
+            "WHEN platform='wikipedia' THEN 'wikipedia' "
             "ELSE 'news' END bucket, "
             "COUNT(*) n, COALESCE(SUM(engagement),0) eng, COALESCE(SUM(reach),0) impr, "
             "COALESCE(SUM(CASE WHEN reach>0 THEN reach*0.75 WHEN engagement>0 THEN engagement*22.0 ELSE 0 END),0) reach_est, "
             "SUM(CASE WHEN sentiment='positive' THEN 1 ELSE 0 END) pos, "
-            "SUM(CASE WHEN sentiment='negative' THEN 1 ELSE 0 END) neg, "
-            # Wikipedia revisions are edit EVENTS, not audience-reached content items;
-            # they must never feed the per-item reach/engagement estimation.
-            "SUM(CASE WHEN platform='wikipedia' THEN 1 ELSE 0 END) wiki_n "
+            "SUM(CASE WHEN sentiment='negative' THEN 1 ELSE 0 END) neg "
             "FROM mentions WHERE " + where + " GROUP BY bucket", wp).fetchall()
+        # Wikipedia-specific segmentation for its own card: revisions, distinct editors,
+        # distinct pages, and high-risk changes (risk keywords in the insight text).
+        wstat = c.execute(
+            "SELECT COUNT(*) revs, COUNT(DISTINCT author) editors, "
+            "COUNT(DISTINCT CASE WHEN instr(platform_post_id,'#')>0 "
+            "THEN substr(platform_post_id,1,instr(platform_post_id,'#')-1) ELSE platform_post_id END) pages, "
+            "SUM(CASE WHEN lower(description) LIKE '%vandal%' OR lower(description) LIKE '%major content removal%' "
+            "OR lower(description) LIKE '%citation%' THEN 1 ELSE 0 END) high "
+            "FROM mentions WHERE " + where + " AND platform='wikipedia'", wp).fetchone()
     sc = {r["s"]: r["n"] for r in sent}
     pos, neg, neu = sc.get("positive", 0), sc.get("negative", 0), sc.get("neutral", 0)
     denom = max(pos + neg + neu, 1)
@@ -684,12 +915,13 @@ def metrics(keyword=None, start=None, end=None, project=None):
     impressions = agg["r"]                                    # measured views/displays
     est_reach = int(round(reach_est["r"]))                    # estimated audience reached (per-item model)
     net = round(100 * (pos - neg) / denom)
-    # Platform buttons: always emit TikTok, YouTube, News in that fixed order.
+    # Platform buttons: TikTok, YouTube, News (audience-metric cards), then Wikipedia
+    # (its own monitoring card with distinct metrics), in that fixed order.
     _pby = {r["bucket"]: r for r in pstat}
     platform_stats = []
     for key, label, cov in (("tiktok", "TikTok", "Open web + oEmbed"),
                             ("youtube", "YouTube", "Official API"),
-                            ("news", "News", "Open web + Wikipedia")):
+                            ("news", "News", "Open web")):
         r = _pby.get(key)
         n = r["n"] if r else 0
         e = r["eng"] if r else 0
@@ -702,11 +934,10 @@ def metrics(keyword=None, start=None, end=None, project=None):
         # documented per-item exposure factor, so the buttons are never empty.
         # Measured metrics (YouTube views/likes) always take precedence.
         estimated = False
-        est_n = n - (r["wiki_n"] if r else 0)   # estimation basis: content items only
-        if est_n > 0 and re_est <= 0:
-            re_est = est_n * _PLATFORM_BASE_REACH.get(key, 1500)
+        if n > 0 and re_est <= 0:
+            re_est = n * _PLATFORM_BASE_REACH.get(key, 1500)
             estimated = True
-        if est_n > 0 and e <= 0:
+        if n > 0 and e <= 0:
             e = int(round(re_est * _PLATFORM_ENG_RATE.get(key, 0.02)))
             estimated = True
         aud = int(round(re_est * 0.75)) if re_est else 0   # estimated unique audience
@@ -714,6 +945,16 @@ def metrics(keyword=None, start=None, end=None, project=None):
                                "mentions": n, "engagement": e, "impressions": impr,
                                "reach": re_est, "audience": aud, "net": netp, "estimated": estimated,
                                "visibility": visibility_score(n, max(impr, re_est), e, netp)})
+    # Wikipedia card: edit-monitoring metrics (not audience reach/engagement).
+    wr = _pby.get("wikipedia")
+    platform_stats.append({
+        "key": "wikipedia", "label": "Wikipedia", "coverage": "Official API · monitoring",
+        "mentions": wr["n"] if wr else 0, "revisions": wstat["revs"] if wstat else 0,
+        "highRisk": (wstat["high"] or 0) if wstat else 0, "editors": wstat["editors"] if wstat else 0,
+        "pages": wstat["pages"] if wstat else 0,
+        # keep these zero so shared charts (engagement/reach) stay honest for edits
+        "engagement": 0, "reach": 0, "impressions": 0, "audience": 0, "net": 0,
+        "estimated": False, "monitoring": True})
     return {"kpis": {"totalMentions": total, "netSentiment": net,
                      "platforms": len(plats), "positivePct": round(100 * pos / denom),
                      "totalEngagement": agg["e"], "totalImpressions": impressions,
@@ -1613,6 +1854,12 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/mentions":
             return self._send(recent(int(one("limit") or 25), one("keyword"), one("platform"),
                                      one("sentiment"), st, en, pr))
+        if u.path == "/api/hashtag":
+            # Global hashtag/term discovery across all brands (project = the open
+            # project, used only when scope=project; brand = optional narrowing).
+            return self._send(hashtag_search(one("q"), st, en, pr,
+                                             scope=(one("scope") or "all"), brand=one("brand"),
+                                             limit=int(one("limit") or 400)))
         # PowerPoint is the single, only export surface (CSV/JSON/printable report retired).
         if u.path == "/api/export/report.pptx":
             try:

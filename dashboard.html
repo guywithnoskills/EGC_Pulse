@@ -73,7 +73,7 @@
   .plat-reset{font-size:11.5px;font-weight:700;color:var(--ink2);background:var(--panel2);border:1px solid var(--line2);border-radius:999px;padding:5px 13px;cursor:pointer}
   .plat-reset:hover{border-color:var(--line3);color:var(--ink)}
   .plat-reset.on{background:var(--brand);color:#fff;border-color:var(--brand)}
-  .pb-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:13px}
+  .pb-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:13px}
   .plat-card{position:relative;text-align:left;border:1px solid var(--line2);background:var(--panel);border-radius:14px;padding:15px 17px 16px;cursor:pointer;overflow:hidden;transition:transform .13s ease,border-color .13s ease,box-shadow .13s ease}
   .plat-card:hover{transform:translateY(-2px);border-color:var(--line3)}
   .plat-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--pc-accent,#888)}
@@ -93,11 +93,15 @@
   .pc-tiktok{--pc-accent:#25f4ee;--pc-tint:#0c1c1c} .pc-tiktok .pc-ic{background:#000;border:1px solid #2b2b2b}
   .pc-youtube{--pc-accent:#ff2b3e;--pc-tint:#2a1417} .pc-youtube .pc-ic{background:#ff0033}
   .pc-news{--pc-accent:#5b8def;--pc-tint:#172339} .pc-news .pc-ic{background:#26344e}
-  @media(max-width:880px){.pb-grid{grid-template-columns:1fr}}
+  .pc-wikipedia{--pc-accent:#9b8cff;--pc-tint:#1e1b33} .pc-wikipedia .pc-ic{background:#2a2550;border:1px solid #3a3568}
+  .pc-metrics b.hot{color:var(--neg)}   /* highlight a non-zero high-risk count */
+  @media(max-width:1150px){.pb-grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:620px){.pb-grid{grid-template-columns:1fr}}
   /* branded source tags in the feed + selected-platform highlight on the section */
   .src-tag.st-tiktok{background:#0c1c1c;border-color:#1e6f6c;color:#3df0e8}
   .src-tag.st-youtube{background:#2a1417;border-color:#7a2230;color:#ff8a96}
   .src-tag.st-news{background:var(--brand-tint);border-color:var(--brand-line);color:var(--brand2)}
+  .src-tag.st-wikipedia{background:#1e1b33;border-color:#3a3568;color:#b9aeff}
   #viewMentions[data-sel] #feed{box-shadow:inset 4px 0 0 var(--sel-accent)}
   #viewMentions[data-sel] #feedCount{color:var(--sel-accent);font-weight:700}
   #viewMentions[data-sel] .search:focus{border-color:var(--sel-accent)}
@@ -311,6 +315,33 @@
   .empty{padding:46px 18px;text-align:center;color:var(--muted);font-size:13px;line-height:1.7}
   .empty .eh{font-family:var(--serif);font-size:16px;color:var(--ink);font-weight:700;margin-bottom:6px}
   .linklike{color:var(--brand);cursor:pointer;font-weight:700}
+  /* ---------- hashtag discovery: scope toggle, active filters, brand matches ---------- */
+  .scopetog{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden;height:34px;flex:none}
+  .scopetog button{border:none;background:var(--panel2);color:var(--muted);font:inherit;font-size:12px;font-weight:700;padding:0 12px;cursor:pointer}
+  .scopetog button+button{border-left:1px solid var(--line2)}
+  .scopetog button.on{background:var(--brand);color:#fff}
+  /* suggested top-hashtag chips shown in the empty state (not a region control) */
+  .sugtag{border:1px solid var(--line2);background:var(--panel2);color:var(--ink2);border-radius:999px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer}
+  .sugtag:hover{border-color:var(--line3)}
+  .activefilters{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 2px;align-items:center}
+  .af-item{display:inline-flex;align-items:center;gap:7px;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:5px 10px;font-size:11.5px;color:var(--ink2)}
+  .af-item b{color:var(--ink);font-weight:700}
+  .af-item .af-k{color:var(--faint);text-transform:uppercase;letter-spacing:.4px;font-size:9px;font-weight:700}
+  .brandmatches{margin:12px 0 2px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .brandmatches .bm-h{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+  .brandmatches .bm-h .bm-t{font-size:12.5px;font-weight:800;letter-spacing:.2px;color:var(--ink)}
+  .brandmatches .bm-h .bm-s{font-size:11.5px;color:var(--muted)}
+  .bm-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--line)}
+  .bm-rank{width:18px;color:var(--faint);font-weight:700;font-size:12px;flex:none;text-align:right}
+  .bm-name{font-weight:700;color:var(--ink);min-width:150px;max-width:220px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bm-count{color:var(--brand2);font-weight:800;font-variant-numeric:tabular-nums;min-width:92px;flex:none}
+  .bm-tags{display:flex;flex-wrap:wrap;gap:5px;flex:1;min-width:0}
+  .bm-tag{font-size:11px;color:var(--muted);background:var(--panel2);border:1px solid var(--line2);border-radius:6px;padding:1px 7px}
+  .bm-meta{font-size:11px;color:var(--faint);flex:none;white-space:nowrap}
+  .bm-empty{color:var(--muted);font-size:12.5px;line-height:1.5}
+  /* brand/project label on a global hashtag result row (blue = brand identity axis) */
+  .brand-tag{background:var(--brand-tint);border:1px solid var(--brand-line);color:var(--brand2);border-radius:6px;padding:1px 7px;font-weight:700;font-size:10.5px}
+  @media(max-width:760px){.bm-name{min-width:110px}.bm-count{min-width:0}.bm-meta{display:none}}
   .linklike:hover{text-decoration:underline}
   .muted{color:var(--muted)} .tiny{font-size:11px;color:var(--faint)}
 
@@ -478,7 +509,11 @@
       <div class="findings" id="findings"></div>
       <div class="platbar" id="platformBar"></div>
       <div class="toolbar">
-        <input class="inp search" id="fSearch" placeholder="Search within mentions" />
+        <input class="inp search" id="fSearch" placeholder="Search hashtags across all brands" title="Global hashtag/term search across every brand in the selected time frame" />
+        <div class="scopetog" id="scopeTog" role="group" aria-label="Hashtag search scope">
+          <button type="button" data-scope="all" class="on">All brands</button>
+          <button type="button" data-scope="project">This project</button>
+        </div>
         <select class="sel" id="fSentiment"><option value="">All sentiment</option><option value="positive">Positive</option><option value="neutral">Neutral</option><option value="negative">Negative</option></select>
         <select class="sel" id="fCoverage">
           <option value="">All coverage</option>
@@ -493,6 +528,8 @@
           <option value="sentiment">Sentiment</option>
         </select>
       </div>
+      <div class="activefilters" id="activeFilters" hidden></div>
+      <div class="brandmatches" id="brandMatches" hidden></div>
       <div class="card">
         <div class="ph" style="padding:14px 16px 0;margin:0"><h3 id="feedTitle">Mentions</h3><span class="hint" id="feedCount"></span></div>
         <div class="mtable" id="feed"></div>
@@ -611,6 +648,16 @@ const filters={q:'',platform:'',sentiment:'',coverage:'',sort:'newest'};
 let lastFeed=[],matrixCache=null,platformsCache=[],lastCollectedAt=null;
 let cfgCache=null,lastMetrics=null;
 let projects=[];
+/* ---------- hashtag discovery (global across all brands) ---------- */
+const SRC_LABEL={tiktok:'TikTok',youtube:'YouTube',news:'News',wikipedia:'Wikipedia'};
+// hashtag search UI state. scope 'all' (default, every brand) | 'project' (open project).
+// Tri-state/Long Island bias is applied silently by the backend ranking — there is no
+// region control and no brand-filter dropdown in the UI (only the scope toggle).
+const hstate={query:'',scope:'all',active:false,data:null,seq:0};
+// when two projects share a name, suffix a short id so the user can tell them apart
+function projDisplayName(name,id){const dup=(projects||[]).filter(x=>x.name===name).length>1;return name+(dup&&id?(' ('+String(id).slice(0,4)+')'):'');}
+function hs_queryLabel(){return hstate.query||'(none)';}
+function hs_scopeLabel(){return hstate.scope==='project'?'This project':'All brands';}
 
 function loadState(){
   const p=new URLSearchParams(location.search);
@@ -863,7 +910,7 @@ function coverageLine(m){
   }
   return COV_BADGE[ct]||'';
 }
-function feedHTML(rows){
+function feedHTML(rows,showBrand){
   if(!rows.length)return '<div class="empty"><div class="eh">No mentions in this view</div>'+
     'Add a tracked term in the bar above and press <b>Collect</b>, or widen the date range. '+
     'Live sources: <span class="linklike" id="goSources">YouTube, open web</span>.</div>';
@@ -879,6 +926,7 @@ function feedHTML(rows){
     const desc=(m.description&&m.description.trim()&&m.description.trim()!==(m.content||'').trim())?('<div class="m-desc">'+esc(m.description)+'</div>'):'';
     const rb=isWiki?wikiRisk(m):null;   // {level,label} risk badge for a monitored revision
     const meta=[];
+    if(showBrand&&m.project_name)meta.push('<span class="brand-tag" title="Brand / project this mention belongs to">'+esc(m.project_name)+'</span>');
     if(cov)meta.push('<span class="cov"><i class="cd '+(direct?'on':'')+'"></i>'+esc(cov)+'</span>');
     if(rtl)meta.push('<span class="rtag rt-'+esc(m.result_type||'')+'">'+esc(rtl)+'</span>');
     if(m.keyword)meta.push('<span>'+esc(m.keyword)+'</span>');
@@ -925,8 +973,10 @@ function renderFindings(rows){
     '<div class="fchips">'+chips+'</div><div class="frec"><span class="frec-ic">&#9656;</span> '+esc(rec)+'</div>';
 }
 function renderFeed(){
+  if(hstate.active){renderHashtagFeed();return;}
   const rows=applyFeed();
-  $('feed').innerHTML=feedHTML(rows);
+  $('feedTitle').textContent='Mentions';
+  $('feed').innerHTML=feedHTML(rows,false);
   $('feedCount').textContent=rows.length?(rows.length+(rows.length===1?' mention':' mentions')):'';
   renderFindings(rows);
   const gs=$('goSources');if(gs)gs.onclick=()=>setView('sources');
@@ -935,21 +985,27 @@ function renderFeed(){
 const PBAR_ICON={
   tiktok:'<svg viewBox="0 0 24 24" fill="#fff"><path d="M16.6 5.8a4.6 4.6 0 0 0 3.4 1.6v2.7a7.5 7.5 0 0 1-3.8-1.1v5.5a5.4 5.4 0 1 1-5.4-5.4c.3 0 .6 0 .9.1v2.8a2.6 2.6 0 1 0 1.8 2.5V3h2.6c0 1 .2 1.9.5 2.8z"/></svg>',
   youtube:'<svg viewBox="0 0 24 24" fill="#fff"><path d="M10 8.4l6 3.6-6 3.6z"/></svg>',
-  news:'<svg viewBox="0 0 24 24" fill="none" stroke="#c7d3ec" stroke-width="1.7"><path d="M4 5h12v14H6a2 2 0 0 1-2-2z"/><path d="M16 9h4v8a2 2 0 0 1-2 2"/><path d="M7 8.5h6M7 11.5h6M7 14.5h4"/></svg>'};
-const PLAT_ACCENT={tiktok:'#25f4ee',youtube:'#ff2b3e',news:'#5b8def'};
-function platKey(r){if((r.display_platform||'')==='TikTok URL')return 'tiktok';if(r.platform==='youtube')return 'youtube';return 'news';}
-function pmetric(v,l){return '<div><b>'+(v==null?0:v)+'</b><span class="pm-l">'+l+'</span></div>';}
+  news:'<svg viewBox="0 0 24 24" fill="none" stroke="#c7d3ec" stroke-width="1.7"><path d="M4 5h12v14H6a2 2 0 0 1-2-2z"/><path d="M16 9h4v8a2 2 0 0 1-2 2"/><path d="M7 8.5h6M7 11.5h6M7 14.5h4"/></svg>',
+  wikipedia:'<svg viewBox="0 0 24 24"><text x="12" y="17.5" font-size="15" font-weight="800" text-anchor="middle" fill="#fff" font-family="Georgia,\'Times New Roman\',serif">W</text></svg>'};
+const PLAT_ACCENT={tiktok:'#25f4ee',youtube:'#ff2b3e',news:'#5b8def',wikipedia:'#9b8cff'};
+function platKey(r){if((r.display_platform||'')==='TikTok URL')return 'tiktok';if(r.platform==='youtube')return 'youtube';if(r.platform==='wikipedia')return 'wikipedia';return 'news';}
+function pmetric(v,l,cls){return '<div><b'+(cls?(' class="'+cls+'"'):'')+'>'+(v==null?0:v)+'</b><span class="pm-l">'+l+'</span></div>';}
 function renderPlatformBar(stats){
   stats=stats||[];
   const head='<div class="pb-head"><span class="pb-label">Platforms</span>'+
     '<button class="plat-reset'+(filters.platform===''?' on':'')+'" data-p="">All platforms</button></div>';
   const cards=stats.map(s=>{
     const cov=esc(s.coverage)+(s.estimated?' · est.':'');
+    // Wikipedia is monitoring, not audience content, so it shows edit metrics.
+    const metrics=(s.key==='wikipedia')
+      ? pmetric(s.revisions,'Revisions')+pmetric(s.highRisk,'High-risk',(s.highRisk>0?'hot':''))+
+        pmetric(s.editors,'Editors')+pmetric(s.pages,'Pages')
+      : pmetric(s.mentions,'Mentions')+pmetric(fmt(s.reach),'Reach')+
+        pmetric(fmt(s.engagement),'Engagement')+pmetric(s.visibility,'Visibility');
     return '<button class="plat-card pc-'+esc(s.key)+(filters.platform===s.key?' on':'')+'" data-p="'+esc(s.key)+'">'+
       '<div class="pc-top"><span class="pc-ic">'+(PBAR_ICON[s.key]||'')+'</span>'+
         '<span class="pc-name">'+esc(s.label)+'</span><span class="pc-cov">'+cov+'</span></div>'+
-      '<div class="pc-metrics">'+pmetric(s.mentions,'Mentions')+pmetric(fmt(s.reach),'Reach')+
-        pmetric(fmt(s.engagement),'Engagement')+pmetric(s.visibility,'Visibility')+'</div></button>';
+      '<div class="pc-metrics">'+metrics+'</div></button>';
   }).join('');
   $('platformBar').innerHTML=head+'<div class="pb-grid">'+cards+'</div>';
   $('platformBar').querySelectorAll('[data-p]').forEach(el=>el.onclick=()=>{
@@ -967,10 +1023,116 @@ function applySelectedBranding(){
   else{vm.removeAttribute('data-sel');vm.style.removeProperty('--sel-accent');}
 }
 const debounce=(fn,ms)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};};
-$('fSearch').oninput=debounce(()=>{filters.q=$('fSearch').value.trim();renderFeed();},220); // no re-render per keystroke
+$('fSearch').oninput=debounce(()=>{
+  hstate.query=$('fSearch').value.trim();
+  if(hstate.query){runHashtag();}
+  else{setHashtagActive(false);renderActiveFilters();renderFeed();}
+},260); // hashtag search is global + server-side; debounce avoids a request per keystroke
 $('fSentiment').onchange=()=>{filters.sentiment=$('fSentiment').value;renderFeed();};
 $('fCoverage').onchange=()=>{filters.coverage=$('fCoverage').value;renderFeed();};
 $('fSort').onchange=()=>{filters.sort=$('fSort').value;renderFeed();};
+// scope toggle: All brands (default) vs This project — a visible choice, never silent
+$('scopeTog').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  hstate.scope=b.getAttribute('data-scope');
+  $('scopeTog').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+  renderActiveFilters(); if(hstate.active)runHashtag();
+});
+function setHashtagActive(on){
+  hstate.active=on;
+  const pb=$('platformBar'),fn=$('findings'),bm=$('brandMatches');
+  if(pb)pb.style.display=on?'none':'';   // per-project analytics hidden during global search
+  if(fn)fn.style.display=on?'none':'';
+  if(bm){bm.hidden=!on; if(!on)bm.innerHTML='';}
+  renderActiveFilters();
+}
+async function runHashtag(){
+  if(!hstate.query){setHashtagActive(false);renderActiveFilters();renderFeed();return;}
+  setHashtagActive(true);
+  const p='q='+encodeURIComponent(hstate.query)+'&start='+state.start+'&end='+state.end
+    +'&scope='+encodeURIComponent(hstate.scope)
+    +(state.project?('&project='+encodeURIComponent(state.project)):'');
+  const tok=++hstate.seq;   // guard against out-of-order responses painting stale results
+  let data;
+  try{data=await (await api('/api/hashtag?'+p)).json();}
+  catch(_){data={results:[],brands:[],topHashtags:[],total:0};}
+  if(tok!==hstate.seq)return;   // a newer search/scope/date change superseded this one
+  hstate.data=data;
+  renderFeed();
+  const nb=(hstate.data.brands||[]).length,tot=hstate.data.total||0;
+  setStatus(tot+' match'+(tot===1?'':'es')+' for '+hstate.query+' · '+nb+' brand'+(nb===1?'':'s'));
+}
+function renderActiveFilters(){
+  const el=$('activeFilters');if(!el)return;
+  if(!hstate.active){el.hidden=true;el.innerHTML='';return;}
+  el.hidden=false;
+  const items=[
+    afItem('Search',hstate.query?esc(hstate.query):'None'),
+    afItem('Scope',esc(hs_scopeLabel())),
+    afItem('Date',esc(fmtRange(state.start,state.end)))
+  ];
+  if(filters.sentiment)items.push(afItem('Sentiment',esc(filters.sentiment)));
+  if(filters.coverage)items.push(afItem('Coverage',esc(filters.coverage==='direct'?'Direct platform data':filters.coverage)));
+  el.innerHTML=items.join('');
+}
+function afItem(k,v){return '<span class="af-item"><span class="af-k">'+k+'</span><b>'+v+'</b></span>';}
+function renderBrandMatches(d){
+  const el=$('brandMatches');if(!el)return; el.hidden=false;
+  const brands=d.brands||[];
+  const head='<div class="bm-h"><span class="bm-t">Brands associated with '+esc(hs_queryLabel())+'</span>'+
+    '<span class="bm-s">'+esc(hs_scopeLabel())+' · '+brands.length+' brand'+(brands.length===1?'':'s')+' · '+esc(fmtRange(state.start,state.end))+'</span></div>';
+  if(!brands.length){el.innerHTML=head+'<div class="bm-empty">No brands associated with '+esc(hs_queryLabel())+' in this time frame.</div>';return;}
+  el.innerHTML=head+brands.map((b,i)=>{
+    const tags=(b.topHashtags||[]).length?(b.topHashtags.map(t=>'<span class="bm-tag">#'+esc(t.tag)+' '+t.count+'</span>').join('')):'<span class="bm-tag" style="opacity:.55">no #hashtags</span>';
+    const src=(b.topSources||[]).map(s=>SRC_LABEL[s.key]||s.key).join(', ');
+    return '<div class="bm-row"><span class="bm-rank">'+(i+1)+'</span>'+
+      '<span class="bm-name" title="'+esc(b.project_name)+'">'+esc(projDisplayName(b.project_name,b.project_id))+'</span>'+
+      '<span class="bm-count">'+b.count+' mention'+(b.count===1?'':'s')+'</span>'+
+      '<span class="bm-tags">'+tags+'</span>'+
+      '<span class="bm-meta">'+(src?esc(src)+' · ':'')+(b.newest?fmtDate(b.newest):'')+'</span></div>';
+  }).join('');
+}
+function renderHashtagFeed(){
+  const d=hstate.data;
+  renderActiveFilters();
+  if(!d){$('feed').innerHTML='';$('feedCount').textContent='';return;}
+  renderBrandMatches(d);
+  // client-side sentiment/coverage/sort on server-matched rows (query already applied server-side).
+  // Default order preserves the backend's silent tri-state relevance ranking; only an
+  // explicit non-default sort re-orders (so Long Island / tri-state surfaces by default).
+  let rows=(d.results||[]).slice();
+  if(filters.sentiment)rows=rows.filter(r=>(r.sentiment||'neutral')===filters.sentiment);
+  if(filters.coverage){if(filters.coverage==='direct')rows=rows.filter(r=>!!r.direct_platform_data);else rows=rows.filter(r=>r.platform_coverage_type===filters.coverage);}
+  if(filters.sort&&filters.sort!=='newest')rows.sort(sorters[filters.sort]);
+  $('feedTitle').textContent='Hashtag results across brands';
+  $('feedCount').textContent=rows.length?(rows.length+(rows.length===1?' mention':' mentions')):'';
+  $('feed').innerHTML=hashtagFeedHTML(d,rows);
+  wireHashtagFeed();
+}
+function hashtagFeedHTML(d,rows){
+  if(rows.length)return feedHTML(rows,true);
+  // Specific empty states, by active-filter precedence.
+  // server matched some, but the client-side sentiment/coverage filter hid them all
+  if((filters.sentiment||filters.coverage)&&(d.total||0)>0)
+    return '<div class="empty"><div class="eh">'+d.total+' match'+(d.total===1?'':'es')+' found, but hidden by the sentiment/coverage filter.</div><button class="linklike" data-clear="sf">Clear sentiment / coverage filter</button></div>';
+  if(hstate.scope==='project')return '<div class="empty"><div class="eh">No matches in this project for the selected time frame.</div><button class="linklike" data-clear="brand">Search all brands instead</button></div>';
+  const tags=(d.topHashtags||[]);
+  const chips=tags.length?('<div class="bm-tags" style="margin-top:9px">'+tags.map(t=>'<button class="sugtag" data-htag="'+esc(t.tag)+'">#'+esc(t.tag)+' <span style="color:var(--faint);font-weight:600">'+t.count+'</span></button>').join('')+'</div>'):'<div class="bm-empty" style="margin-top:6px">No hashtags were found in this time frame.</div>';
+  return '<div class="empty"><div class="eh">No hashtag matches across all brands in this time frame.</div>Top hashtags collected in this same window:'+chips+'</div>';
+}
+function wireHashtagFeed(){
+  document.querySelectorAll('.wiki-draft').forEach(a=>a.onclick=e=>{e.preventDefault();openWikiModal(a.getAttribute('data-page'));});
+  $('feed').querySelectorAll('[data-htag]').forEach(b=>b.onclick=()=>{const t=b.getAttribute('data-htag');$('fSearch').value='#'+t;hstate.query='#'+t;runHashtag();});
+  $('feed').querySelectorAll('[data-clear]').forEach(b=>b.onclick=()=>{
+    const k=b.getAttribute('data-clear');
+    if(k==='sf'){  // client-side filters only — no refetch needed, just re-render
+      filters.sentiment='';filters.coverage='';
+      const s=$('fSentiment');if(s)s.value='';const cv=$('fCoverage');if(cv)cv.value='';
+      renderActiveFilters();renderFeed();return;
+    }
+    if(k==='brand'){hstate.scope='all';$('scopeTog').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.getAttribute('data-scope')==='all'));}
+    renderActiveFilters();runHashtag();
+  });
+}
 
 function updateExports(){
   // Single export action: the active project as a PowerPoint deck.
@@ -1002,6 +1164,7 @@ async function refresh(){
     lastFeed=await (await api('/api/mentions?limit=200&'+qstr())).json();  // always show stored results in scope
     renderFeed();
     setStatus(_collectMsg||((m.kpis.totalMentions||0).toLocaleString()+' mention'+(m.kpis.totalMentions===1?'':'s')+' · '+(state.term||'all terms')));
+    if(hstate.active)runHashtag();   // hashtag search respects the (possibly changed) date range/project
   }catch(e){setStatus('API offline');}
   finally{_refreshing=false; if(_refreshQueued){_refreshQueued=false;refresh();}}
 }
@@ -1105,6 +1268,10 @@ function resetFilterUI(){
   filters.q='';filters.platform='';filters.sentiment='';filters.coverage='';
   const fs=$('fSearch');if(fs)fs.value='';
   ['fSentiment','fCoverage'].forEach(id=>{const el=$(id);if(el)el.value='';});
+  // exit hashtag mode + reset scope so nothing carries silently across projects
+  hstate.query='';hstate.scope='all';hstate.data=null;
+  const stg=$('scopeTog');if(stg)stg.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.getAttribute('data-scope')==='all'));
+  if(typeof setHashtagActive==='function')setHashtagActive(false);
 }
 function resetClientState(){
   // Full client-side wipe so no stale term, filter, cache, graph, or dataset survives.
